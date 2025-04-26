@@ -1,6 +1,7 @@
 ﻿using DlibDotNet;
 using OpenCvSharp;
 using System.Diagnostics;
+using Point = OpenCvSharp.Point;
 
 
 // Open the default camera (usually the first camera)
@@ -31,6 +32,12 @@ double fps = 0.0;
 
 DateTime? drowsyStartTime = null;
 TimeSpan drowsyThreshold = TimeSpan.FromSeconds(3);
+
+int sleepAnimationFrame = 0;
+string[] sleepFrames = new[] { "Z", "Zz", "Zzz", "Zzzz", "Zzzzz" };
+
+int floatingOffsetY = 0;
+const int FLOAT_SPEED = 2; // pixels up per frame
 
 while (true)
 {
@@ -63,24 +70,44 @@ while (true)
             if (drowsyStartTime == null)
             {
                 drowsyStartTime = DateTime.Now; // start timer
+
+                floatingOffsetY = 0; // reset floating start
+                sleepAnimationFrame = 0; // reset Zzz cycle
             }
             else if (DateTime.Now - drowsyStartTime > drowsyThreshold)
             {
                 // Been drowsy for > 3 seconds
-                Cv2.PutText(frame, "Drowsy!", new OpenCvSharp.Point(face.Left, face.Top - 10), HersheyFonts.HersheySimplex, 1, Scalar.Red, 2);
+
+                string sleepText = sleepFrames[sleepAnimationFrame];
+
+                // Calculate floating position
+                int textX = face.Left;
+                int textY = face.Top - 10 - floatingOffsetY;
+
+                Cv2.PutText(frame, sleepText, new Point(textX, textY),
+                    HersheyFonts.HersheySimplex, 2, Scalar.Blue, 3);
+
+                // Move text upward
+                floatingOffsetY += FLOAT_SPEED;
+
+                // Advance animation frame
+                sleepAnimationFrame = (sleepAnimationFrame + 1) % sleepFrames.Length;
             }
         }
         else
         {
             // Eyes open → reset timer
             drowsyStartTime = null;
+
+            sleepAnimationFrame = 0;
+            floatingOffsetY = 0;
         }
 
         // Draw landmarks
         for (int i = 0; i < shape.Parts; i++)
         {
             var point = shape.GetPart((uint)i);
-            Cv2.Circle(frame, new OpenCvSharp.Point(point.X, point.Y), 2, Scalar.Lime, -1);
+            Cv2.Circle(frame, new Point(point.X, point.Y), 2, Scalar.Lime, -1);
         }
     }
 
@@ -138,7 +165,7 @@ while (true)
     }
 
     // Display FPS on the frame
-    Cv2.PutText(frame, $"FPS: {fps:F2}", new OpenCvSharp.Point(10, 30), HersheyFonts.HersheySimplex, 1, Scalar.White, 2);
+    Cv2.PutText(frame, $"FPS: {fps:F2}", new Point(10, 30), HersheyFonts.HersheySimplex, 1, Scalar.White, 2);
 
     // Show the frame in the window
     window.ShowImage(frame);
