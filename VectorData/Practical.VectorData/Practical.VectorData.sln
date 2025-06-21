@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36212.18
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.PgVector", "Practical.VectorData.PgVector\Practical.VectorData.PgVector.csproj", "{3E75C353-F708-4D61-8477-8D59B119B60A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3E75C353-F708-4D61-8477-8D59B119B60A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3E75C353-F708-4D61-8477-8D59B119B60A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3E75C353-F708-4D61-8477-8D59B119B60A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3E75C353-F708-4D61-8477-8D59B119B60A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {BF7410FA-CEB7-4695-9B4D-B43C084E4A73}
+	EndGlobalSection
+EndGlobal
