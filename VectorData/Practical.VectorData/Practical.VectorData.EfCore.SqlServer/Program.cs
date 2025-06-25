@@ -1,5 +1,4 @@
-﻿using Microsoft.Data.SqlClient;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using System.Text.Json;
 
@@ -37,9 +36,8 @@ var query = dbContext.Blogs
     .OrderBy(p => EF.Functions.VectorDistance("cosine", p.Embedding, queryEmbedding))
     .Take(5);
 
-//var queryEmbeddingParameter = new SqlParameter("@__queryEmbedding_1", JsonSerializer.Serialize(queryEmbedding));
 //var query = dbContext.Blogs
-//    .FromSqlRaw(" SELECT TOP 5 [b].[Id], [b].[Description], [b].[Embedding] FROM [Blogs] AS [b] ORDER BY VECTOR_DISTANCE('cosine', [b].[Embedding], CAST(@__queryEmbedding_1 AS vector(3)))", queryEmbeddingParameter);
+//    .FromSqlInterpolated($" SELECT TOP 5 [b].[Id], [b].[Description], [b].[Embedding] FROM [Blogs] AS [b] ORDER BY VECTOR_DISTANCE('cosine', [b].[Embedding], CAST({JsonSerializer.Serialize(queryEmbedding)} AS vector(3)))");
 
 foreach (var result in await query.ToArrayAsync())
 {
