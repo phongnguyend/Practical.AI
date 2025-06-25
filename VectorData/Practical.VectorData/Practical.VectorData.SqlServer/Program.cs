@@ -2,7 +2,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.VectorData;
-using Microsoft.SemanticKernel.Connectors.PgVector;
+using Microsoft.SemanticKernel.Connectors.SqlServer;
 using OpenAI;
 using OpenAI.Embeddings;
 using System.ClientModel;
@@ -13,7 +13,10 @@ var services = new ServiceCollection();
 
 var embeddingGenerator = GetEmbeddingGenerator(configuration);
 
-using var collection = new PostgresCollection<int, Blog>("Host=127.0.0.1;Database=vectordata;Username=postgres;Password=postgres", "Blogs");
+var connectionString1 = configuration["ConnectionStrings:SqlServer"];
+var connectionString2 = configuration["ConnectionStrings:AzureSql"];
+
+using var collection = new SqlServerCollection<int, Blog>(connectionString2, "Blogs");
 
 Console.WriteLine("Creating collection...");
 await collection.EnsureCollectionDeletedAsync();
@@ -95,9 +98,9 @@ public class Blog
     [VectorStoreData]
     public required string Description { get; set; }
 
-    [VectorStoreVector(Dimensions: 3, DistanceFunction = DistanceFunction.CosineSimilarity)]
+    [VectorStoreVector(Dimensions: 3, DistanceFunction = DistanceFunction.CosineDistance)]
     public ReadOnlyMemory<float>? Embedding { get; set; }
 
-    //[VectorStoreVector(Dimensions: 1536, DistanceFunction = DistanceFunction.CosineSimilarity)]
+    //[VectorStoreVector(Dimensions: 1536, DistanceFunction = DistanceFunction.CosineDistance)]
     //public ReadOnlyMemory<float>? Embedding { get; set; }
 }
