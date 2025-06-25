@@ -7,6 +7,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.PgVect
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.SqlServer", "Practical.VectorData.SqlServer\Practical.VectorData.SqlServer.csproj", "{F655210C-4193-490E-BDD0-F70BD00B54EC}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.EfCore.SqlServer", "Practical.VectorData.EfCore.SqlServer\Practical.VectorData.EfCore.SqlServer.csproj", "{15DDAD1B-B952-48EB-85B8-6C940BFCE23F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.EfCore.PostgreSQL", "Practical.VectorData.EfCore.PostgreSQL\Practical.VectorData.EfCore.PostgreSQL.csproj", "{B93AB0AA-563B-4BF8-AF00-4D5EB8A29F36}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +25,14 @@ Global
 		{F655210C-4193-490E-BDD0-F70BD00B54EC}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F655210C-4193-490E-BDD0-F70BD00B54EC}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F655210C-4193-490E-BDD0-F70BD00B54EC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{15DDAD1B-B952-48EB-85B8-6C940BFCE23F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{15DDAD1B-B952-48EB-85B8-6C940BFCE23F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{15DDAD1B-B952-48EB-85B8-6C940BFCE23F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{15DDAD1B-B952-48EB-85B8-6C940BFCE23F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B93AB0AA-563B-4BF8-AF00-4D5EB8A29F36}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B93AB0AA-563B-4BF8-AF00-4D5EB8A29F36}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B93AB0AA-563B-4BF8-AF00-4D5EB8A29F36}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B93AB0AA-563B-4BF8-AF00-4D5EB8A29F36}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
