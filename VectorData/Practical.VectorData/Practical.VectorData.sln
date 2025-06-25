@@ -5,6 +5,8 @@ VisualStudioVersion = 17.14.36212.18
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.PgVector", "Practical.VectorData.PgVector\Practical.VectorData.PgVector.csproj", "{3E75C353-F708-4D61-8477-8D59B119B60A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.SqlServer", "Practical.VectorData.SqlServer\Practical.VectorData.SqlServer.csproj", "{F655210C-4193-490E-BDD0-F70BD00B54EC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{3E75C353-F708-4D61-8477-8D59B119B60A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3E75C353-F708-4D61-8477-8D59B119B60A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3E75C353-F708-4D61-8477-8D59B119B60A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F655210C-4193-490E-BDD0-F70BD00B54EC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F655210C-4193-490E-BDD0-F70BD00B54EC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F655210C-4193-490E-BDD0-F70BD00B54EC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F655210C-4193-490E-BDD0-F70BD00B54EC}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
