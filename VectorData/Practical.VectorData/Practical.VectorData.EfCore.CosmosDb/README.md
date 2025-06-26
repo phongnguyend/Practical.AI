@@ -1,0 +1,1 @@
+- https://learn.microsoft.com/en-sg/ef/core/providers/cosmos/vector-search

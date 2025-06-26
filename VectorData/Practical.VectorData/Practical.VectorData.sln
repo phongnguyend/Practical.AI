@@ -11,6 +11,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.EfCore
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.EfCore.PostgreSQL", "Practical.VectorData.EfCore.PostgreSQL\Practical.VectorData.EfCore.PostgreSQL.csproj", "{B93AB0AA-563B-4BF8-AF00-4D5EB8A29F36}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.CosmosDbNoSql", "Practical.VectorData.CosmosDbNoSql\Practical.VectorData.CosmosDbNoSql.csproj", "{65042BD5-6185-4460-8EAB-2A5E2F57F821}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.EfCore.CosmosDb", "Practical.VectorData.EfCore.CosmosDb\Practical.VectorData.EfCore.CosmosDb.csproj", "{8D76B7A6-D147-49A2-BDC8-7BF22B9813DA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -33,6 +37,14 @@ Global
 		{B93AB0AA-563B-4BF8-AF00-4D5EB8A29F36}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B93AB0AA-563B-4BF8-AF00-4D5EB8A29F36}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B93AB0AA-563B-4BF8-AF00-4D5EB8A29F36}.Release|Any CPU.Build.0 = Release|Any CPU
+		{65042BD5-6185-4460-8EAB-2A5E2F57F821}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{65042BD5-6185-4460-8EAB-2A5E2F57F821}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{65042BD5-6185-4460-8EAB-2A5E2F57F821}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{65042BD5-6185-4460-8EAB-2A5E2F57F821}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8D76B7A6-D147-49A2-BDC8-7BF22B9813DA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8D76B7A6-D147-49A2-BDC8-7BF22B9813DA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8D76B7A6-D147-49A2-BDC8-7BF22B9813DA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8D76B7A6-D147-49A2-BDC8-7BF22B9813DA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
