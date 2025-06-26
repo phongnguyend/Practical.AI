@@ -15,6 +15,12 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.Cosmos
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.EfCore.CosmosDb", "Practical.VectorData.EfCore.CosmosDb\Practical.VectorData.EfCore.CosmosDb.csproj", "{8D76B7A6-D147-49A2-BDC8-7BF22B9813DA}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Cosmos", "Cosmos", "{1455139B-9371-6631-1F62-489A0A736BD1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SqlServer", "SqlServer", "{339472B5-CA06-FA0C-BD2C-80FBBD87BEAE}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "PostgreSQL", "PostgreSQL", "{1F4AFE95-2D71-7778-DEE7-82F03F1EE13A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -48,6 +54,14 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{3E75C353-F708-4D61-8477-8D59B119B60A} = {1F4AFE95-2D71-7778-DEE7-82F03F1EE13A}
+		{F655210C-4193-490E-BDD0-F70BD00B54EC} = {339472B5-CA06-FA0C-BD2C-80FBBD87BEAE}
+		{15DDAD1B-B952-48EB-85B8-6C940BFCE23F} = {339472B5-CA06-FA0C-BD2C-80FBBD87BEAE}
+		{B93AB0AA-563B-4BF8-AF00-4D5EB8A29F36} = {1F4AFE95-2D71-7778-DEE7-82F03F1EE13A}
+		{65042BD5-6185-4460-8EAB-2A5E2F57F821} = {1455139B-9371-6631-1F62-489A0A736BD1}
+		{8D76B7A6-D147-49A2-BDC8-7BF22B9813DA} = {1455139B-9371-6631-1F62-489A0A736BD1}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {BF7410FA-CEB7-4695-9B4D-B43C084E4A73}
