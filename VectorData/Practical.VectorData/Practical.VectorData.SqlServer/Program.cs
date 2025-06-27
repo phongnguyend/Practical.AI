@@ -65,7 +65,7 @@ await foreach (var result in collection.SearchAsync(queryEmbedding, top: 1))
     Console.WriteLine($"Similar blog ID: {result.Record.Id}, Description: {result.Record.Description}");
 }
 
-static IEmbeddingGenerator GetEmbeddingGenerator(IConfigurationRoot configuration)
+static IEmbeddingGenerator<string, Embedding<float>> GetEmbeddingGenerator(IConfigurationRoot configuration)
 {
     // Use OpenAI
 
