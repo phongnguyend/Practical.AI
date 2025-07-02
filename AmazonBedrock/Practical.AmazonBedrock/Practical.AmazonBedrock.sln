@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36212.18
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.AmazonBedrock", "Practical.AmazonBedrock\Practical.AmazonBedrock.csproj", "{707DF6E1-792E-49E6-B5FB-5E277C4AA98D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{707DF6E1-792E-49E6-B5FB-5E277C4AA98D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{707DF6E1-792E-49E6-B5FB-5E277C4AA98D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{707DF6E1-792E-49E6-B5FB-5E277C4AA98D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{707DF6E1-792E-49E6-B5FB-5E277C4AA98D}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {F21C9799-92A8-40EC-A266-24343C2B93A3}
+	EndGlobalSection
+EndGlobal
