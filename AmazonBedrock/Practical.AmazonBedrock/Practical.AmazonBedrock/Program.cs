@@ -11,10 +11,13 @@ var configuration = builder.Build();
 
 string awsAccessKeyId = configuration["Amazon:AccessKeyId"] ?? throw new Exception("Missing AccessKeyId");
 string awsSecretAccessKey = configuration["Amazon:SecretAccessKey"] ?? throw new Exception("Missing SecretAccessKey");
-string awsSessionToken = configuration["Amazon:SessionToken"] ?? throw new Exception("Missing SessionToken");
+string awsSessionToken = configuration["Amazon:SessionToken"] ?? string.Empty;
+string regionEndpoint = configuration["Amazon:RegionEndpoint"] ?? throw new Exception("Missing RegionEndpoint");
 
 // Create a Bedrock Runtime client in the AWS Region you want to use.
-var client = new AmazonBedrockRuntimeClient(awsAccessKeyId, awsSecretAccessKey, awsSessionToken, RegionEndpoint.EUCentral1);
+var client = string.IsNullOrEmpty(awsSessionToken) ?
+    new AmazonBedrockRuntimeClient(awsAccessKeyId, awsSecretAccessKey, RegionEndpoint.GetBySystemName(regionEndpoint))
+    : new AmazonBedrockRuntimeClient(awsAccessKeyId, awsSecretAccessKey, awsSessionToken, RegionEndpoint.GetBySystemName(regionEndpoint));
 
 // Define the user message.
 var userMessage = File.ReadAllText("../../prompt.txt");
@@ -34,6 +37,7 @@ var nativeRequest = JsonSerializer.Serialize(new
 // Create a request with the model ID, the user message, and an inference configuration.
 var request = new InvokeModelRequest()
 {
+    //ModelId = "anthropic.claude-3-7-sonnet-20250219-v1:0",
     ModelId = "arn:aws:bedrock:eu-central-1:891377219642:inference-profile/eu.anthropic.claude-3-7-sonnet-20250219-v1:0",
     Body = new MemoryStream(Encoding.UTF8.GetBytes(nativeRequest)),
     ContentType = "application/json"
