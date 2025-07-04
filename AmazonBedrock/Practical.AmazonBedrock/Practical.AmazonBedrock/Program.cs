@@ -1,6 +1,7 @@
 ﻿using Amazon;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
+using Amazon.Runtime.CredentialManagement;
 using Microsoft.Extensions.Configuration;
 using System.Text;
 using System.Text.Json;
@@ -9,15 +10,8 @@ using System.Text.Json.Nodes;
 var builder = new ConfigurationBuilder().AddUserSecrets<Program>();
 var configuration = builder.Build();
 
-string awsAccessKeyId = configuration["Amazon:AccessKeyId"] ?? throw new Exception("Missing AccessKeyId");
-string awsSecretAccessKey = configuration["Amazon:SecretAccessKey"] ?? throw new Exception("Missing SecretAccessKey");
-string awsSessionToken = configuration["Amazon:SessionToken"] ?? string.Empty;
-string regionEndpoint = configuration["Amazon:RegionEndpoint"] ?? throw new Exception("Missing RegionEndpoint");
-
 // Create a Bedrock Runtime client in the AWS Region you want to use.
-var client = string.IsNullOrEmpty(awsSessionToken) ?
-    new AmazonBedrockRuntimeClient(awsAccessKeyId, awsSecretAccessKey, RegionEndpoint.GetBySystemName(regionEndpoint))
-    : new AmazonBedrockRuntimeClient(awsAccessKeyId, awsSecretAccessKey, awsSessionToken, RegionEndpoint.GetBySystemName(regionEndpoint));
+AmazonBedrockRuntimeClient client = GetBedrockClient(configuration);
 
 // Define the user message.
 var userMessage = File.ReadAllText("../../prompt.txt");
@@ -59,4 +53,36 @@ catch (AmazonBedrockRuntimeException e)
 {
     Console.WriteLine($"ERROR: Can't invoke '{request.ModelId}'. Reason: {e.Message}");
     throw;
+}
+
+static AmazonBedrockRuntimeClient GetBedrockClient(IConfiguration configuration)
+{
+    string profileName = configuration["Amazon:ProfileName"] ?? string.Empty;
+    string awsAccessKeyId = configuration["Amazon:AccessKeyId"] ?? string.Empty;
+    string awsSecretAccessKey = configuration["Amazon:SecretAccessKey"] ?? string.Empty;
+    string awsSessionToken = configuration["Amazon:SessionToken"] ?? string.Empty;
+    string regionEndpoint = configuration["Amazon:RegionEndpoint"] ?? throw new Exception("Missing RegionEndpoint");
+
+    if (!string.IsNullOrEmpty(profileName))
+    {
+        var chain = new CredentialProfileStoreChain();
+        if (chain.TryGetAWSCredentials(profileName, out var credentials))
+        {
+            return new AmazonBedrockRuntimeClient(credentials, RegionEndpoint.GetBySystemName(regionEndpoint));
+        }
+
+        throw new Exception("Unable to load credentials from SSO profile.");
+
+    }
+    else if (!string.IsNullOrEmpty(awsAccessKeyId))
+    {
+        if (!string.IsNullOrEmpty(awsSessionToken))
+        {
+            return new AmazonBedrockRuntimeClient(awsAccessKeyId, awsSecretAccessKey, awsSessionToken, RegionEndpoint.GetBySystemName(regionEndpoint));
+        }
+
+        return new AmazonBedrockRuntimeClient(awsAccessKeyId, awsSecretAccessKey, RegionEndpoint.GetBySystemName(regionEndpoint));
+    }
+
+    return new AmazonBedrockRuntimeClient(RegionEndpoint.GetBySystemName(regionEndpoint));
 }

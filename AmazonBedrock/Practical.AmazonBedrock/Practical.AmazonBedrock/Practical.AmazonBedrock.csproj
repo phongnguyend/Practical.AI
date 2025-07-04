@@ -10,6 +10,8 @@
 
   <ItemGroup>
     <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.1.1" />
+    <PackageReference Include="AWSSDK.SSO" Version="4.0.0.12" />
+    <PackageReference Include="AWSSDK.SSOOIDC" Version="4.0.0.12" />
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.3" />
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="9.0.1" />
   </ItemGroup>
