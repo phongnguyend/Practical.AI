@@ -6,7 +6,10 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-var builder = new ConfigurationBuilder().AddUserSecrets<Program>();
+var builder = new ConfigurationBuilder()
+    .AddJsonFile("appsettings.json")
+    .AddUserSecrets<Program>();
+
 var configuration = builder.Build();
 var options = GetAmazonBedrockOptions(configuration);
 
@@ -14,14 +17,14 @@ var options = GetAmazonBedrockOptions(configuration);
 AmazonBedrockRuntimeClient client = options.CreateAmazonBedrockRuntimeClient();
 
 // Define the user message.
-var userMessage = File.ReadAllText("../../prompt.txt");
+var userMessage = File.ReadAllText("../../prompt2.txt");
 
 //Format the request payload using the model's native structure.
 var nativeRequest = JsonSerializer.Serialize(new
 {
-    anthropic_version = "bedrock-2023-05-31",
-    max_tokens = 512,
-    temperature = 0.5,
+    anthropic_version = options.AnthropicVersion,
+    max_tokens = options.MaxTokens,
+    temperature = options.Temperature,
     messages = new[]
     {
         new { role = "user", content = userMessage }
