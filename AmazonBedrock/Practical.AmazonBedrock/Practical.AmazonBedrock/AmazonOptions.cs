@@ -17,6 +17,12 @@ public class AmazonOptions
 
     public string ModelId { get; set; }
 
+    public string AnthropicVersion { get; set; }
+
+    public int MaxTokens { get; set; }
+
+    public decimal Temperature { get; set; }
+
     public AmazonBedrockRuntimeClient CreateAmazonBedrockRuntimeClient()
     {
         var regionEndpoint = global::Amazon.RegionEndpoint.GetBySystemName(RegionEndpoint);
