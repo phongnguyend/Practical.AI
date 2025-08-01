@@ -48,8 +48,16 @@ try
     var modelResponse = await JsonNode.ParseAsync(response.Body);
 
     // Extract and print the response text.
-    var responseText = modelResponse["content"]?[0]?["text"] ?? "";
+    var responseText = modelResponse["content"]?[0]?["text"].ToString() ?? "";
     Console.WriteLine(responseText);
+
+    var jsonStart = responseText.IndexOf('[');
+    var jsonEnd = responseText.LastIndexOf(']');
+
+    if (jsonStart >= 0 && jsonEnd > jsonStart)
+    {
+        var jsonPart = responseText.Substring(jsonStart, jsonEnd - jsonStart + 1);
+    }
 }
 catch (AmazonBedrockRuntimeException e)
 {
@@ -61,9 +69,5 @@ static AmazonOptions GetAmazonBedrockOptions(IConfiguration configuration)
 {
     var options = new AmazonOptions();
     configuration.GetSection("Amazon").Bind(options);
-
-    //options.ModelId = "anthropic.claude-3-7-sonnet-20250219-v1:0";
-    options.ModelId = "arn:aws:bedrock:eu-central-1:891377219642:inference-profile/eu.anthropic.claude-3-7-sonnet-20250219-v1:0";
-
     return options;
 }
