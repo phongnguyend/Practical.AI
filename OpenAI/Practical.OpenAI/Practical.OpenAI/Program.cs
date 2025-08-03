@@ -1,24 +1,20 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using OpenAI;
 using OpenAI.Chat;
-using System.ClientModel;
+using Practical.OpenAI;
 
-var builder = new ConfigurationBuilder().AddUserSecrets<Program>();
+var builder = new ConfigurationBuilder()
+    .AddJsonFile("appsettings.json")
+    .AddUserSecrets<Program>();
+
 var configuration = builder.Build();
 
+
 var services = new ServiceCollection();
-
-string openAiKey = configuration["OpenAI:GitHubToken"] ?? throw new Exception("Missing API Key");
-
-var openAIOptions = new OpenAIClientOptions()
-{
-    Endpoint = new Uri("https://models.inference.ai.azure.com")
-};
-
-ChatClient client = new ChatClient("gpt-4o", new ApiKeyCredential(openAiKey), openAIOptions);
-
 var serviceProvider = services.BuildServiceProvider();
+
+var options = GetOpenAIOptions(configuration);
+ChatClient client = options.CreateChatClient();
 
 //await AskMappings(client, ["Company Number", "Email Address", "Ngày Giao Dịch"], ["Company Code", "Transaction Date"]);
 await AskColumns(client, "merge columns A and D to the column C", ["A", "B", "C", "D"]);
@@ -59,7 +55,6 @@ static async Task AskMappings(ChatClient client, string[] headersInFile, string[
         Console.WriteLine($"AI >> {reponseText}");
     }
 }
-
 
 static async Task AskColumns(ChatClient client, string userRequest, string[] columns)
 {
@@ -120,4 +115,11 @@ static async Task NormalChat(ChatClient client)
 
         Console.WriteLine($"AI >> {reponseText}");
     }
+}
+
+static OpenAIOptions GetOpenAIOptions(IConfiguration configuration)
+{
+    var options = new OpenAIOptions();
+    configuration.GetSection("OpenAI").Bind(options);
+    return options;
 }
