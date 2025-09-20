@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.Data.SqlTypes;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using System.Text.Json;
 
@@ -13,24 +14,24 @@ var blogs = new[] {
     new Blog
     {
         Description = "This is a blog about AI and machine learning.",
-        Embedding = [0.1f, 0.2f, 0.3f]
+        Embedding = new SqlVector<float>(new float[] { 0.1f, 0.2f, 0.3f })
     },
     new Blog
     {
         Description = "This is a blog about animals and plants.",
-        Embedding = [99.1f, 50f, 3f],
+        Embedding = new SqlVector < float >(new float[] { 99.1f, 50f, 3f }),
     },
     new Blog
     {
         Description = "This is a blog about sports and outdoor activities.",
-        Embedding = [3f, 60f, 240f],
+        Embedding = new SqlVector < float >(new float[] { 3f, 60f, 240f }),
     }
 };
 
 dbContext.Blogs.AddRange(blogs);
 await dbContext.SaveChangesAsync();
 
-var queryEmbedding = new float[] { 0.1f, 0.2f, 0.3f };
+var queryEmbedding = new SqlVector<float>(new float[] { 0.1f, 0.2f, 0.3f });
 
 var query = dbContext.Blogs
     .OrderBy(p => EF.Functions.VectorDistance("cosine", p.Embedding, queryEmbedding))
@@ -50,7 +51,7 @@ public class Blog
 
     public required string Description { get; set; }
 
-    public float[]? Embedding { get; set; }
+    public SqlVector<float> Embedding { get; set; }
 }
 
 public class TestDbContext : DbContext
@@ -67,7 +68,6 @@ public class TestDbContext : DbContext
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         optionsBuilder.UseSqlServer(_connectionString);
-        optionsBuilder.UseSqlServer(_connectionString, o => o.UseVectorSearch());
 
         //optionsBuilder.LogTo(Console.WriteLine, Microsoft.Extensions.Logging.LogLevel.Information)
         //    .EnableSensitiveDataLogging()
