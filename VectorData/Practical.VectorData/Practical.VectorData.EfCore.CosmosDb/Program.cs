@@ -1,6 +1,5 @@
 ﻿using Microsoft.Azure.Cosmos;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Cosmos.Extensions;
 using Microsoft.Extensions.Configuration;
 
 var builder = new ConfigurationBuilder().AddUserSecrets<Program>();
@@ -36,11 +35,9 @@ await dbContext.SaveChangesAsync();
 
 var queryEmbedding = new float[] { 0.1f, 0.2f, 0.3f };
 
-#pragma warning disable EF9103 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 var query = dbContext.Blogs
     .OrderBy(p => EF.Functions.VectorDistance(p.Embedding!, queryEmbedding))
     .Take(5);
-#pragma warning restore EF9103 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 
 foreach (var result in await query.ToArrayAsync())
 {
@@ -80,8 +77,6 @@ public class TestDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-#pragma warning disable EF9103 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
-        modelBuilder.Entity<Blog>().Property(p => p.Embedding).IsVector(DistanceFunction.Cosine, dimensions: 3);
-#pragma warning restore EF9103 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
+        modelBuilder.Entity<Blog>().Property(p => p.Embedding).IsVectorProperty(DistanceFunction.Cosine, dimensions: 3);
     }
 }
