@@ -66,7 +66,7 @@ static IEmbeddingGenerator<string, Embedding<float>> GetEmbeddingGenerator(IConf
 {
     // Use OpenAI
 
-    string openAiKey = configuration["OpenAI:GitHubToken"] ?? throw new Exception("Missing API Key");
+    string openAiKey = configuration["OpenAI:ApiKey"] ?? throw new Exception("Missing API Key");
 
     var openAIOptions = new OpenAIClientOptions()
     {

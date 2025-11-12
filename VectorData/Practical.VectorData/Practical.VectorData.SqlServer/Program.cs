@@ -16,7 +16,7 @@ var embeddingGenerator = GetEmbeddingGenerator(configuration);
 var connectionString1 = configuration["ConnectionStrings:SqlServer"];
 var connectionString2 = configuration["ConnectionStrings:AzureSql"];
 
-using var collection = new SqlServerCollection<int, Blog>(connectionString2, "Blogs");
+using var collection = new SqlServerCollection<int, Blog>(connectionString1, "Blogs");
 
 Console.WriteLine("Creating collection...");
 await collection.EnsureCollectionDeletedAsync();
@@ -69,7 +69,7 @@ static IEmbeddingGenerator<string, Embedding<float>> GetEmbeddingGenerator(IConf
 {
     // Use OpenAI
 
-    string openAiKey = configuration["OpenAI:GitHubToken"] ?? throw new Exception("Missing API Key");
+    string openAiKey = configuration["OpenAI:ApiKey"] ?? throw new Exception("Missing API Key");
 
     var openAIOptions = new OpenAIClientOptions()
     {
