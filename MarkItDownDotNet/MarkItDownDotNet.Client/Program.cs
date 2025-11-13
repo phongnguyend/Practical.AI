@@ -3,6 +3,7 @@
 HttpClient client = new HttpClient();
 
 var filePath = "C:\\Users\\Phong.NguyenDoan\\Downloads\\phongnguyend.pdf";
+var resultFilePath = "C:\\Users\\Phong.NguyenDoan\\Downloads\\phongnguyend.md";
 
 using var form = new MultipartFormDataContent();
 using var fileContent = new ByteArrayContent(File.ReadAllBytes(filePath));
@@ -13,7 +14,10 @@ form.Add(new StringContent("Test Name"), "name");
 var response = await client.PostAsync($"https://localhost:7110/", form);
 response.EnsureSuccessStatusCode();
 
-var createdFile = await response.Content.ReadAsStringAsync();
-Console.WriteLine(createdFile);
+var markdown = await response.Content.ReadAsStringAsync();
+
+File.WriteAllText(resultFilePath, markdown);
+
+Console.WriteLine(markdown);
 
 Console.ReadLine();
