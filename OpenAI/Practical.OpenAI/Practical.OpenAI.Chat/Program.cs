@@ -1,6 +1,6 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using OpenAI.Chat;
 using Practical.OpenAI;
 
 var builder = new ConfigurationBuilder()
@@ -14,11 +14,11 @@ var services = new ServiceCollection();
 var serviceProvider = services.BuildServiceProvider();
 
 var options = GetOpenAIOptions(configuration);
-ChatClient client = options.CreateChatClient();
+var client = options.CreateChatClient();
 
 var messages = new List<ChatMessage>
 {
-    new SystemChatMessage("You are a helpful assistant.")
+    new ChatMessage(ChatRole.System, "You are a helpful assistant.")
 };
 
 while (true)
@@ -29,11 +29,11 @@ while (true)
     if (string.IsNullOrEmpty(userInput))
         break;
 
-    messages.Add(new UserChatMessage(userInput));
+    messages.Add(new ChatMessage(ChatRole.User, userInput));
 
-    ChatCompletion response = await client.CompleteChatAsync(messages);
-    var reponseText = response.Content[0].Text;
-    messages.Add(new AssistantChatMessage(reponseText));
+    var response = await client.GetResponseAsync(messages);
+    var reponseText = response.Text;
+    messages.Add(new ChatMessage(ChatRole.Assistant, reponseText));
 
     Console.WriteLine($"AI: {reponseText}");
 }
