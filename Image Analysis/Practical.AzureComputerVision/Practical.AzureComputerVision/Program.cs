@@ -16,7 +16,7 @@ string endpoint = configuration["AzureAIVision:Endpoint"]!;
 var client = CreateImageAnalysisClient(endpoint, key);
 
 // Analyze an image to get features and other properties.
-await AnalyzeImageUrlAsync(client, "landmark.jpg");
+await AnalyzeImageAsync(client, "landmark.jpg");
 
 static ImageAnalysisClient CreateImageAnalysisClient(string endpoint, string key)
 {
@@ -24,7 +24,7 @@ static ImageAnalysisClient CreateImageAnalysisClient(string endpoint, string key
     return client;
 }
 
-static async Task AnalyzeImageUrlAsync(ImageAnalysisClient client, string imageFilePath)
+static async Task AnalyzeImageAsync(ImageAnalysisClient client, string imageFilePath)
 {
     Console.WriteLine($"Analyzing the image {Path.GetFileName(imageFilePath)}...");
     Console.WriteLine();
