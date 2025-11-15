@@ -9,4 +9,8 @@ public class ChunkEmbedding
     public ReadOnlyMemory<float> EmbeddingVector { get; set; }
 
     public UsageDetails UsageDetails { get; set; }
+    
+    public int StartIndex { get; set; }
+    
+    public int EndIndex { get; set; }
 }
