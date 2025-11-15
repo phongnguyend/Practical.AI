@@ -7,7 +7,7 @@ public interface ITextChunkingService
 {
     IEnumerable<Chunk> ChunkSentences(string text, int maxTokens = 800);
 
-    IEnumerable<Chunk> ChunkWithOverlap(string text, int maxTokens = 800, double overlapRatio = 0.1);
+    IEnumerable<Chunk> ChunkSentencesOverlapping(string text, int maxTokens = 800, double overlapRatio = 0.1);
 }
 
 public class Chunk
@@ -88,7 +88,7 @@ public class TextChunkingService : ITextChunkingService
         }
     }
 
-    public IEnumerable<Chunk> ChunkWithOverlap(string text, int maxTokens = 800, double overlapRatio = 0.1)
+    public IEnumerable<Chunk> ChunkSentencesOverlapping(string text, int maxTokens = 800, double overlapRatio = 0.1)
     {
         if (string.IsNullOrWhiteSpace(text))
             yield break;
