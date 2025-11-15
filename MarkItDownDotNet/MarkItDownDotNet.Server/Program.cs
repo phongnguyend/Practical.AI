@@ -2,12 +2,13 @@ using CSnakes.Runtime;
 using MarkItDownDotNet.Server;
 
 var builder = WebApplication.CreateBuilder(args);
+var configuration = builder.Configuration;
 
 builder.Services
     .WithPython()
-    .WithHome(builder.Configuration["PythonModulesFolderPath"]!)
-    .FromNuGet("3.12.4")
-    .WithVirtualEnvironment(builder.Configuration["VirtualEnvironmentFolderPath"]!);
+    .WithHome(configuration["PythonModulesFolderPath"]!)
+    .FromNuGet(configuration["PythonVersion"]!)
+    .WithVirtualEnvironment(configuration["VirtualEnvironmentFolderPath"]!);
 
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IPythonEnvironment>().Md());
 
