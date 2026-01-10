@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.OpenAI.Chat", "Pr
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.OpenAI", "Practical.OpenAI\Practical.OpenAI.csproj", "{E52CF404-D589-4056-9969-4DBB5C27EBC1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.OpenAI.ImageAnalysis", "Practical.OpenAI.ImageAnalysis\Practical.OpenAI.ImageAnalysis.csproj", "{E0AFC2CF-275A-402D-ABB0-4A8D28681014}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,6 +28,10 @@ Global
 		{E52CF404-D589-4056-9969-4DBB5C27EBC1}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E52CF404-D589-4056-9969-4DBB5C27EBC1}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E52CF404-D589-4056-9969-4DBB5C27EBC1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E0AFC2CF-275A-402D-ABB0-4A8D28681014}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E0AFC2CF-275A-402D-ABB0-4A8D28681014}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E0AFC2CF-275A-402D-ABB0-4A8D28681014}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E0AFC2CF-275A-402D-ABB0-4A8D28681014}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
