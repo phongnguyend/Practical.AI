@@ -1,2 +1,4 @@
-# Vector Store connectors
-- https://learn.microsoft.com/en-us/semantic-kernel/concepts/vector-store-connectors/out-of-the-box-connectors/?pivots=programming-language-csharp
+- [Out-of-the-box Vector Store connectors (Preview) | Microsoft Learn](https://learn.microsoft.com/en-us/semantic-kernel/concepts/vector-store-connectors/out-of-the-box-connectors/?pivots=programming-language-csharp)
+- [Choose an Azure Service for Vector Search - Azure Architecture Center | Microsoft Learn](https://learn.microsoft.com/en-us/azure/architecture/guide/technology-choices/vector-search)
+- [Chunk documents - Azure AI Search | Microsoft Learn](https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-chunk-documents)
+- [How to generate image embeddings with Microsoft Foundry Models service - Microsoft Foundry | Microsoft Learn](https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/how-to/use-image-embeddings?view=foundry-classic&pivots=programming-language-csharp)
