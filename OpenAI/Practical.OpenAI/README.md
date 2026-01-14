@@ -1,0 +1,2 @@
+- [Azure OpenAI Service - Pricing | Microsoft Azure](https://azure.microsoft.com/en-us/pricing/details/azure-openai/)
+- [Prototyping with AI models - GitHub Docs](https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models#rate-limits)
