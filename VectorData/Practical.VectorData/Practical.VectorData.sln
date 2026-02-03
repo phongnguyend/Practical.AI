@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.14.36212.18
+# Visual Studio Version 18
+VisualStudioVersion = 18.1.11312.151 d18.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.PgVector", "Practical.VectorData.PgVector\Practical.VectorData.PgVector.csproj", "{3E75C353-F708-4D61-8477-8D59B119B60A}"
 EndProject
@@ -20,6 +20,10 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SqlServer", "SqlServer", "{339472B5-CA06-FA0C-BD2C-80FBBD87BEAE}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "PostgreSQL", "PostgreSQL", "{1F4AFE95-2D71-7778-DEE7-82F03F1EE13A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Practical.VectorData.AzureAISearch", "Practical.VectorData.AzureAISearch\Practical.VectorData.AzureAISearch.csproj", "{1BF5D11A-35BC-4128-BF13-13F6061286CF}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Azure AI Search", "Azure AI Search", "{7F771EF6-12E4-437F-B4A4-77899FB9E008}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -51,6 +55,10 @@ Global
 		{8D76B7A6-D147-49A2-BDC8-7BF22B9813DA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8D76B7A6-D147-49A2-BDC8-7BF22B9813DA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8D76B7A6-D147-49A2-BDC8-7BF22B9813DA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1BF5D11A-35BC-4128-BF13-13F6061286CF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1BF5D11A-35BC-4128-BF13-13F6061286CF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1BF5D11A-35BC-4128-BF13-13F6061286CF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1BF5D11A-35BC-4128-BF13-13F6061286CF}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -62,6 +70,7 @@ Global
 		{B93AB0AA-563B-4BF8-AF00-4D5EB8A29F36} = {1F4AFE95-2D71-7778-DEE7-82F03F1EE13A}
 		{65042BD5-6185-4460-8EAB-2A5E2F57F821} = {1455139B-9371-6631-1F62-489A0A736BD1}
 		{8D76B7A6-D147-49A2-BDC8-7BF22B9813DA} = {1455139B-9371-6631-1F62-489A0A736BD1}
+		{1BF5D11A-35BC-4128-BF13-13F6061286CF} = {7F771EF6-12E4-437F-B4A4-77899FB9E008}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {BF7410FA-CEB7-4695-9B4D-B43C084E4A73}
