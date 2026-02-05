@@ -1,0 +1,10 @@
+{
+	"servers": {
+		"CheckNugetPackages": {
+			"type": "stdio",
+			"command": "CheckNugetPackagesMcp",
+			"args": []
+		}
+	},
+	"inputs": []
+}

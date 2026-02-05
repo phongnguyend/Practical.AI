@@ -2,8 +2,9 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using OpenAI;
+using ModelContextProtocol.Client;
 using OpenAI.Chat;
+using OpenAI.Responses;
 using Practical.MicrosoftAgentFramework;
 using System.ComponentModel;
 
@@ -16,17 +17,29 @@ var configuration = builder.Build();
 var services = new ServiceCollection();
 var serviceProvider = services.BuildServiceProvider();
 
+// Create the MCP client
+McpClient mcpClient = await McpClient.CreateAsync(
+    new StdioClientTransport(new()
+    {
+        Command = "CheckNugetPackagesMcp",
+        Arguments = [],
+        Name = "Check Nuget Packages Mcp",
+    }));
+
+var tools = await mcpClient.ListToolsAsync();
+
 var options = GetOpenAIOptions(configuration);
 ChatClient client = options.CreateChatClient();
 
-AIAgent agent = client.CreateAIAgent(
+AIAgent agent = client.AsAIAgent(
     instructions: "You are good at telling jokes.",
     tools: [
         AIFunctionFactory.Create(GetCurrentDateTime),
-        AIFunctionFactory.Create(GetComputerName)
+        AIFunctionFactory.Create(GetComputerName),
+        .. tools.Cast<AITool>()
     ]);
 
-AgentThread thread = agent.GetNewThread();
+var session = await agent.GetNewSessionAsync();
 
 while (true)
 {
@@ -37,7 +50,9 @@ while (true)
     if (string.IsNullOrEmpty(userInput))
         break;
 
-    var response = await agent.RunAsync(userInput, thread);
+    var userMessage = new Microsoft.Extensions.AI.ChatMessage(ChatRole.User, userInput);
+
+    var response = await agent.RunAsync(userMessage, session);
     Console.WriteLine($"Agent: {response}");
 }
 
