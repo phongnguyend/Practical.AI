@@ -39,7 +39,7 @@ AIAgent agent = client.AsAIAgent(
         .. tools.Cast<AITool>()
     ]);
 
-var session = await agent.GetNewSessionAsync();
+var session = await agent.CreateSessionAsync();
 
 while (true)
 {
