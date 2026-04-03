@@ -11,7 +11,7 @@ var home = Path.Join(Environment.CurrentDirectory, "."); /* Path to your Python 
 builder.Services
     .WithPython()
     .WithHome(home)
-    .FromNuGet("3.12.4")
+    .FromNuGet("3.14.0")
     .WithVirtualEnvironment(Path.Combine(userProfileDirectory, "MarkItDownDotNet", ".venv"));
 
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IPythonEnvironment>().Md());
