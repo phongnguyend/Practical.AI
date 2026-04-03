@@ -6,6 +6,12 @@ namespace Practical.MicrosoftAgentFramework;
 
 public class OpenAIOptions
 {
+    public static OpenAIOptions Default = new OpenAIOptions
+    {
+        Endpoint = "https://api.openai.com/v1",
+        ModelId = "gpt-4o"
+    };
+
     public string Endpoint { get; set; }
 
     public string ApiKey { get; set; }
