@@ -13,8 +13,11 @@
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.5" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.5" />
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.5" />
+    <PackageReference Include="Microsoft.Extensions.DataIngestion" Version="10.4.0-preview.1.26160.2" />
+    <PackageReference Include="Microsoft.Extensions.DataIngestion.MarkItDown" Version="10.4.0-preview.1.26160.2" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.5" />
-    <PackageReference Include="ModelContextProtocol" Version="1.2.0" />
+    <PackageReference Include="Microsoft.ML.Tokenizers.Data.O200kBase" Version="3.0.0-preview.26160.2" />
+    <PackageReference Include="Microsoft.SemanticKernel.Connectors.SqlServer" Version="1.74.0-preview" />
   </ItemGroup>
 
   <ItemGroup>
