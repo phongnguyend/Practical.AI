@@ -20,7 +20,7 @@ app.MapPost("/", (IMd markitdown, HttpContext context) =>
 
     using (var stream = File.OpenWrite(filePath))
     {
-        var formFile = context.Request.Form.Files["formFile"];
+        var formFile = context.Request.Form.Files["file"];
         formFile!.CopyTo(stream);
     }
 
