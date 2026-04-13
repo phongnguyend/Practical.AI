@@ -10,6 +10,7 @@ using OpenAI.Responses;
 using Practical.MicrosoftAgentFramework;
 using System.ClientModel;
 using System.ComponentModel;
+using System.Diagnostics;
 
 var builder = new ConfigurationBuilder()
     .AddJsonFile("appsettings.json")
@@ -36,14 +37,28 @@ ChatClient client = options.CreateChatClient();
 
 OpenAIOptions.Default.ApiKey = options.ApiKey;
 
-AIAgent agent = client.AsAIAgent(
-    instructions: "You are good at telling jokes.",
-    tools: [
-        AIFunctionFactory.Create(GetCurrentDateTime),
-        AIFunctionFactory.Create(GetComputerName),
-        AIFunctionFactory.Create(SearchInternalDataAsync),
-        .. tools.Cast<AITool>()
-    ]);
+#pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
+var skillsProvider = new AgentSkillsProvider(
+    Path.Combine(AppContext.BaseDirectory, "skills"),
+    RunScriptAsync
+    );
+#pragma warning restore MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
+
+var agent = client.AsAIAgent(new ChatClientAgentOptions
+{
+    Name = "SkillsAgent",
+    ChatOptions = new()
+    {
+        Instructions = "You are a helpful assistant.",
+        Tools = [
+            AIFunctionFactory.Create(GetCurrentDateTime),
+            AIFunctionFactory.Create(GetComputerName),
+            AIFunctionFactory.Create(SearchInternalDataAsync),
+            .. tools.Cast<AITool>()
+        ],
+    },
+    AIContextProviders = [skillsProvider],
+});
 
 var session = await agent.CreateSessionAsync();
 
@@ -71,7 +86,7 @@ static string GetComputerName() => Environment.MachineName;
 static OpenAIOptions GetOpenAIOptions(IConfiguration configuration)
 {
     var options = new OpenAIOptions();
-    configuration.GetSection("OpenAI").Bind(options);
+    configuration.GetSection("AzureOpenAI").Bind(options);
     return options;
 }
 
@@ -98,3 +113,33 @@ static async Task<List<Chunk>> SearchInternalDataAsync(string query)
 
     return rs;
 }
+
+#pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
+static async Task<object?> RunScriptAsync(AgentFileSkill skill,
+    AgentFileSkillScript script,
+    AIFunctionArguments arguments,
+    CancellationToken cancellationToken)
+{
+    var psi = new ProcessStartInfo("powershell")
+    {
+        RedirectStandardOutput = true,
+        UseShellExecute = false,
+    };
+    psi.ArgumentList.Add(script.FullPath);
+    if (arguments != null)
+    {
+        foreach (var (key, value) in arguments)
+        {
+            if (value is not null)
+            {
+                psi.ArgumentList.Add($"-{key}");
+                psi.ArgumentList.Add(value.ToString()!);
+            }
+        }
+    }
+    using var process = Process.Start(psi)!;
+    string output = await process.StandardOutput.ReadToEndAsync();
+    await process.WaitForExitAsync();
+    return output.Trim();
+}
+#pragma warning restore MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
