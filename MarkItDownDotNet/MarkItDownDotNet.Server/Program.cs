@@ -14,7 +14,7 @@ builder.Services.AddSingleton(sp => sp.GetRequiredService<IPythonEnvironment>().
 
 var app = builder.Build();
 
-app.MapPost("/", (IMd markitdown, HttpContext context) =>
+app.MapPost("/convert", (IMd markitdown, HttpContext context) =>
 {
     string filePath = FileService.CreateTempFilePath();
 

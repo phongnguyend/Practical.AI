@@ -11,7 +11,7 @@ fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-dat
 form.Add(fileContent, "file", Path.GetFileName(filePath));
 form.Add(new StringContent("Test Name"), "name");
 
-var response = await client.PostAsync($"https://localhost:7110/", form);
+var response = await client.PostAsync($"https://localhost:7110/convert", form);
 response.EnsureSuccessStatusCode();
 
 var markdown = await response.Content.ReadAsStringAsync();
