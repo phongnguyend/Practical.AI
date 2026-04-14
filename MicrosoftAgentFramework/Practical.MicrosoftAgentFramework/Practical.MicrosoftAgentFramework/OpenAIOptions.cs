@@ -1,4 +1,5 @@
-﻿using OpenAI;
+﻿using Microsoft.Extensions.AI;
+using OpenAI;
 using OpenAI.Chat;
 using System.ClientModel;
 
@@ -6,12 +7,6 @@ namespace Practical.MicrosoftAgentFramework;
 
 public class OpenAIOptions
 {
-    public static OpenAIOptions Default = new OpenAIOptions
-    {
-        Endpoint = "https://api.openai.com/v1",
-        ModelId = "gpt-4o"
-    };
-
     public string Endpoint { get; set; }
 
     public string ApiKey { get; set; }
@@ -35,5 +30,14 @@ public class OpenAIOptions
         };
 
         return new ChatClient(ModelId, new ApiKeyCredential(ApiKey), options);
+    }
+
+    public IEmbeddingGenerator<string, Embedding<float>> CreateEmbeddingClient()
+    {
+        OpenAIClient openAIClient = new(
+        new ApiKeyCredential(ApiKey),
+        new OpenAIClientOptions { Endpoint = new Uri(Endpoint) });
+
+        return openAIClient.GetEmbeddingClient("text-embedding-3-small").AsIEmbeddingGenerator();
     }
 }

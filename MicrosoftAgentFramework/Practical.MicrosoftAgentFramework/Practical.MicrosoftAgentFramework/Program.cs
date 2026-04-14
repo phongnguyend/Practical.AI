@@ -2,13 +2,10 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.SemanticKernel.Connectors.SqlServer;
 using ModelContextProtocol.Client;
-using OpenAI;
 using OpenAI.Chat;
 using OpenAI.Responses;
 using Practical.MicrosoftAgentFramework;
-using System.ClientModel;
 using System.ComponentModel;
 using System.Diagnostics;
 
@@ -34,8 +31,7 @@ var tools = await mcpClient.ListToolsAsync();
 
 var options = GetOpenAIOptions(configuration);
 ChatClient client = options.CreateChatClient();
-
-OpenAIOptions.Default.ApiKey = options.ApiKey;
+var searchFunctions = new SearchFunctions(options);
 
 #pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 var skillsProvider = new AgentSkillsProvider(
@@ -53,7 +49,7 @@ var agent = client.AsAIAgent(new ChatClientAgentOptions
         Tools = [
             AIFunctionFactory.Create(GetCurrentDateTime),
             AIFunctionFactory.Create(GetComputerName),
-            AIFunctionFactory.Create(SearchInternalDataAsync),
+            AIFunctionFactory.Create(searchFunctions.SearchInternalDataAsync),
             .. tools.Cast<AITool>()
         ],
     },
@@ -90,29 +86,7 @@ static OpenAIOptions GetOpenAIOptions(IConfiguration configuration)
     return options;
 }
 
-[Description("Search Internal Data")]
-static async Task<List<Chunk>> SearchInternalDataAsync(string query)
-{
-    OpenAIClient openAIClient = new(
-        new ApiKeyCredential(OpenAIOptions.Default.ApiKey),
-        new OpenAIClientOptions { Endpoint = new Uri("https://models.github.ai/inference") });
 
-    IEmbeddingGenerator<string, Embedding<float>> embeddingGenerator =
-    openAIClient.GetEmbeddingClient("text-embedding-3-small").AsIEmbeddingGenerator();
-
-    var queryEmbedding = (await embeddingGenerator.GenerateAsync(query)).Vector;
-
-    using var collection = new SqlServerCollection<Guid, Chunk>("Server=.;Database=Microsoft.Extensions.DataIngestion;User Id=sa;Password=sqladmin123!@#;Encrypt=False", "chunks");
-
-    var rs = new List<Chunk>();
-
-    await foreach (var item in collection.SearchAsync(queryEmbedding, 5))
-    {
-        rs.Add(item.Record);
-    }
-
-    return rs;
-}
 
 #pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 static async Task<object?> RunScriptAsync(AgentFileSkill skill,
