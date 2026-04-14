@@ -6,6 +6,7 @@ using ModelContextProtocol.Client;
 using OpenAI.Chat;
 using OpenAI.Responses;
 using Practical.MicrosoftAgentFramework;
+using Practical.MicrosoftAgentFramework.Shared;
 using System.ComponentModel;
 using System.Diagnostics;
 
@@ -85,8 +86,6 @@ static OpenAIOptions GetOpenAIOptions(IConfiguration configuration)
     configuration.GetSection("AzureOpenAI").Bind(options);
     return options;
 }
-
-
 
 #pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 static async Task<object?> RunScriptAsync(AgentFileSkill skill,

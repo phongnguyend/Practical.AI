@@ -3,7 +3,7 @@ using OpenAI;
 using OpenAI.Chat;
 using System.ClientModel;
 
-namespace Practical.MicrosoftAgentFramework;
+namespace Practical.MicrosoftAgentFramework.Shared;
 
 public class OpenAIOptions
 {

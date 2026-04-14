@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.AI;
 using Microsoft.SemanticKernel.Connectors.SqlServer;
+using Practical.MicrosoftAgentFramework.Shared;
 using System.ComponentModel;
 
 namespace Practical.MicrosoftAgentFramework;
