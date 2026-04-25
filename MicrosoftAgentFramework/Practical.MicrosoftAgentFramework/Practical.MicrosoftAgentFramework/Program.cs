@@ -33,6 +33,7 @@ var tools = await mcpClient.ListToolsAsync();
 var options = GetOpenAIOptions(configuration);
 ChatClient client = options.CreateChatClient();
 var searchFunctions = new SearchFunctions(options);
+var memoryFunctions = new MemoryFunctions(Path.Combine(AppContext.BaseDirectory, "user_memory.json"));
 
 #pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 var skillsProvider = new AgentSkillsProvider(
@@ -46,11 +47,15 @@ var agent = client.AsAIAgent(new ChatClientAgentOptions
     Name = "SkillsAgent",
     ChatOptions = new()
     {
-        Instructions = "You are a helpful assistant.",
+        Instructions = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "instructions.txt")),
         Tools = [
             AIFunctionFactory.Create(GetCurrentDateTime),
             AIFunctionFactory.Create(GetComputerName),
             AIFunctionFactory.Create(searchFunctions.SearchInternalDataAsync),
+            AIFunctionFactory.Create(memoryFunctions.RememberAsync),
+            AIFunctionFactory.Create(memoryFunctions.RecallAsync),
+            AIFunctionFactory.Create(memoryFunctions.ListMemoriesAsync),
+            AIFunctionFactory.Create(memoryFunctions.ForgetAsync),
             .. tools.Cast<AITool>()
         ],
     },
