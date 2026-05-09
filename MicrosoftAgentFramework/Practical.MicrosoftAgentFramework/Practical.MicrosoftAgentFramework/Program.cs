@@ -1,4 +1,5 @@
-﻿using Microsoft.Agents.AI;
+﻿using AgentGovernance.Mcp;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,6 +10,7 @@ using Practical.MicrosoftAgentFramework;
 using Practical.MicrosoftAgentFramework.Shared;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text.Json;
 
 var builder = new ConfigurationBuilder()
     .AddJsonFile("appsettings.json")
@@ -19,16 +21,7 @@ var configuration = builder.Build();
 var services = new ServiceCollection();
 var serviceProvider = services.BuildServiceProvider();
 
-// Create the MCP client
-McpClient mcpClient = await McpClient.CreateAsync(
-    new StdioClientTransport(new()
-    {
-        Command = "CheckNugetPackagesMcp",
-        Arguments = [],
-        Name = "Check Nuget Packages Mcp",
-    }));
-
-var tools = await mcpClient.ListToolsAsync();
+IList<McpClientTool> tools = await GetMcpToolsAsync();
 
 var options = GetOpenAIOptions(configuration);
 ChatClient client = options.CreateChatClient();
@@ -60,6 +53,7 @@ var agent = client.AsAIAgent(new ChatClientAgentOptions
         ],
     },
     AIContextProviders = [skillsProvider],
+    ChatHistoryProvider = new InMemoryChatHistoryProvider()
 });
 
 var session = await agent.CreateSessionAsync();
@@ -93,10 +87,7 @@ static OpenAIOptions GetOpenAIOptions(IConfiguration configuration)
 }
 
 #pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
-static async Task<object?> RunScriptAsync(AgentFileSkill skill,
-    AgentFileSkillScript script,
-    AIFunctionArguments arguments,
-    CancellationToken cancellationToken)
+static async Task<object?> RunScriptAsync(AgentFileSkill skill, AgentFileSkillScript script, JsonElement? arguments, IServiceProvider? serviceProvider, CancellationToken cancellationToken)
 {
     var psi = new ProcessStartInfo("powershell")
     {
@@ -104,14 +95,16 @@ static async Task<object?> RunScriptAsync(AgentFileSkill skill,
         UseShellExecute = false,
     };
     psi.ArgumentList.Add(script.FullPath);
-    if (arguments != null)
+
+    if (arguments != null && arguments.Value.ValueKind == JsonValueKind.Array)
     {
-        foreach (var (key, value) in arguments)
+        foreach (var element in arguments.Value.EnumerateArray())
         {
-            if (value is not null)
+            if (element.ValueKind != JsonValueKind.Null)
             {
-                psi.ArgumentList.Add($"-{key}");
-                psi.ArgumentList.Add(value.ToString()!);
+                psi.ArgumentList.Add(element.ValueKind == JsonValueKind.String
+                    ? element.GetString()!
+                    : element.ToString());
             }
         }
     }
@@ -121,3 +114,39 @@ static async Task<object?> RunScriptAsync(AgentFileSkill skill,
     return output.Trim();
 }
 #pragma warning restore MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
+
+static async Task<IList<McpClientTool>> GetMcpToolsAsync()
+{
+    // Create the MCP client
+    McpClient mcpClient = await McpClient.CreateAsync(
+        new StdioClientTransport(new()
+        {
+            Command = "CheckNugetPackagesMcp",
+            Arguments = [],
+            Name = "Check Nuget Packages Mcp",
+        }));
+
+    var tools = await mcpClient.ListToolsAsync();
+
+    var scanner = new McpSecurityScanner();
+
+    foreach (var tool in tools)
+    {
+        var toolDefinition = new AgentGovernance.Mcp.McpToolDefinition
+        {
+            Name = tool.Name,
+            Description = tool.Description,
+            InputSchema = tool.JsonSchema.ToString()
+        };
+
+        var result = scanner.Scan(toolDefinition);
+
+        Console.WriteLine($"Risk score: {result.RiskScore}/100");
+        foreach (var threat in result.Threats)
+        {
+            Console.WriteLine($"  [{threat.Severity}] {threat.Type}: {threat.Description}");
+        }
+    }
+
+    return tools;
+}
