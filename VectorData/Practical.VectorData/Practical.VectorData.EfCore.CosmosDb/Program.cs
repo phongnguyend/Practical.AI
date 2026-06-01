@@ -9,26 +9,23 @@ using var dbContext = new TestDbContext(configuration["ConnectionStrings:CosmosD
 await dbContext.Database.EnsureDeletedAsync();
 await dbContext.Database.EnsureCreatedAsync();
 
-var blogs = new[] {
-    new Blog
-    {
-        Id = 1,
-        Description = "This is a blog about AI and machine learning.",
-        Embedding = [0.1f, 0.2f, 0.3f]
-    },
-    new Blog
-    {
-        Id = 2,
-        Description = "This is a blog about animals and plants.",
-        Embedding = [99.1f, 50f, 3f],
-    },
-    new Blog
-    {
-        Id = 3,
-        Description = "This is a blog about sports and outdoor activities.",
-        Embedding = [3f, 60f, 240f],
-    }
+var blogTemplates = new[]
+{
+    new { Description = "This is a blog about AI and machine learning.",      Embedding = new float[] { 0.1f, 0.2f, 0.3f } },
+    new { Description = "This is a blog about animals and plants.",           Embedding = new float[] { 99.1f, 50f, 3f } },
+    new { Description = "This is a blog about sports and outdoor activities.", Embedding = new float[] { 3f, 60f, 240f } },
 };
+
+var tenants = new[] { "tenant-1", "tenant-2", "tenant-3" };
+var blogs = tenants
+    .SelectMany((tenantId, ti) => blogTemplates.Select((t, bi) => new Blog
+    {
+        Id = ti * blogTemplates.Length + bi + 1,
+        TenantId = tenantId,
+        Description = t.Description,
+        Embedding = t.Embedding
+    }))
+    .ToArray();
 
 dbContext.Blogs.AddRange(blogs);
 await dbContext.SaveChangesAsync();
@@ -36,6 +33,7 @@ await dbContext.SaveChangesAsync();
 var queryEmbedding = new float[] { 0.1f, 0.2f, 0.3f };
 
 var query = dbContext.Blogs
+    .Where(p => p.TenantId == "tenant-1")
     .OrderBy(p => EF.Functions.VectorDistance(p.Embedding!, queryEmbedding))
     .Take(5);
 
@@ -47,6 +45,8 @@ foreach (var result in await query.ToArrayAsync())
 public class Blog
 {
     public int Id { get; set; }
+
+    public required string TenantId { get; set; }
 
     public required string Description { get; set; }
 
@@ -77,6 +77,7 @@ public class TestDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<Blog>().HasPartitionKey(p => p.TenantId);
         modelBuilder.Entity<Blog>().Property(p => p.Embedding).IsVectorProperty(DistanceFunction.Cosine, dimensions: 3);
     }
 }

@@ -22,26 +22,23 @@ Console.WriteLine("Creating collection...");
 await collection.EnsureCollectionDeletedAsync();
 await collection.EnsureCollectionExistsAsync();
 
-var blogs = new[] {
-    new Blog
-    {
-        Id = 1,
-        Description = "This is a blog about AI and machine learning.",
-        Embedding = new float[] { 0.1f, 0.2f, 0.3f }
-    },
-    new Blog
-    {
-        Id = 2,
-        Description = "This is a blog about animals and plants.",
-        Embedding = new float[] { 99.1f, 50f, 3f },
-    },
-    new Blog
-    {
-        Id = 3,
-        Description = "This is a blog about sports and outdoor activities.",
-        Embedding = new float[] { 3f, 60f, 240f },
-    }
+var blogTemplates = new[]
+{
+    new { Description = "This is a blog about AI and machine learning.",      Embedding = new float[] { 0.1f, 0.2f, 0.3f } },
+    new { Description = "This is a blog about animals and plants.",           Embedding = new float[] { 99.1f, 50f, 3f } },
+    new { Description = "This is a blog about sports and outdoor activities.", Embedding = new float[] { 3f, 60f, 240f } },
 };
+
+var tenants = new[] { "tenant-1", "tenant-2", "tenant-3" };
+var blogs = tenants
+    .SelectMany((tenantId, ti) => blogTemplates.Select((t, bi) => new Blog
+    {
+        Id = ti * blogTemplates.Length + bi + 1,
+        TenantId = tenantId,
+        Description = t.Description,
+        Embedding = t.Embedding
+    }))
+    .ToArray();
 
 foreach (var blog in blogs)
 {
@@ -60,7 +57,7 @@ Console.WriteLine("Searching for similar blogs...");
 var queryEmbedding = new float[] { 0.1f, 0.2f, 0.3f };
 //var queryEmbedding = (await embeddingGenerator.GenerateAsync("dog")).Vector;
 
-await foreach (var result in collection.SearchAsync(queryEmbedding, top: 1))
+await foreach (var result in collection.SearchAsync(queryEmbedding, top: 1, new VectorSearchOptions<Blog> { Filter = r => r.TenantId == "tenant-1" }))
 {
     Console.WriteLine($"Similar blog ID: {result.Record.Id}, Description: {result.Record.Description}");
 }
@@ -94,6 +91,9 @@ public class Blog
 {
     [VectorStoreKey]
     public int Id { get; set; }
+
+    [VectorStoreData]
+    public required string TenantId { get; set; }
 
     [VectorStoreData]
     public required string Description { get; set; }

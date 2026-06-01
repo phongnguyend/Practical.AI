@@ -25,7 +25,7 @@ var searchClient = new SearchClient(new Uri(endpoint), "blogs", new AzureKeyCred
 
 Console.WriteLine("Creating collection...");
 
-await indexClient.DeleteIndexAsync("blogs");
+await indexClient.DeleteIndexAsync("blogs", cancellationToken: default);
 
 var index = new SearchIndex("blogs")
 {
@@ -34,6 +34,11 @@ var index = new SearchIndex("blogs")
         new SimpleField("Id", SearchFieldDataType.String)
         {
             IsKey = true,
+        },
+
+        new SimpleField("TenantId", SearchFieldDataType.String)
+        {
+            IsFilterable = true,
         },
 
         new SearchableField("Description")
@@ -66,26 +71,22 @@ var index = new SearchIndex("blogs")
 
 await indexClient.CreateIndexAsync(index);
 
-var blogs = new[] {
-    new Blog
-    {
-        Id = Guid.CreateVersion7(),
-        Description = "This is a blog about AI and machine learning.",
-        Embedding = new float[] { 0.1f, 0.2f, 0.3f }
-    },
-    new Blog
-    {
-        Id = Guid.CreateVersion7(),
-        Description = "This is a blog about animals and plants.",
-        Embedding = new float[] { 99.1f, 50f, 3f },
-    },
-    new Blog
-    {
-        Id = Guid.CreateVersion7(),
-        Description = "This is a blog about sports and outdoor activities.",
-        Embedding = new float[] { 3f, 60f, 240f },
-    }
+var blogTemplates = new[]
+{
+    new { Description = "This is a blog about AI and machine learning.", Embedding = new float[] { 0.1f, 0.2f, 0.3f } },
+    new { Description = "This is a blog about animals and plants.",      Embedding = new float[] { 99.1f, 50f, 3f } },
+    new { Description = "This is a blog about sports and outdoor activities.", Embedding = new float[] { 3f, 60f, 240f } },
 };
+
+var blogs = new[] { "tenant-1", "tenant-2", "tenant-3" }
+    .SelectMany(tenantId => blogTemplates.Select(t => new Blog
+    {
+        Id = Guid.CreateVersion7(),
+        TenantId = tenantId,
+        Description = t.Description,
+        Embedding = t.Embedding
+    }))
+    .ToArray();
 
 foreach (var blog in blogs)
 {
@@ -106,6 +107,7 @@ var queryEmbedding = new float[] { 0.1f, 0.2f, 0.3f };
 
 var options = new SearchOptions
 {
+    Filter = "TenantId eq 'tenant-1'",
     VectorSearch = new()
     {
         Queries =
@@ -155,6 +157,8 @@ static IEmbeddingGenerator<string, Embedding<float>> GetEmbeddingGenerator(IConf
 public class Blog
 {
     public Guid Id { get; set; }
+
+    public required string TenantId { get; set; }
 
     public required string Description { get; set; }
 

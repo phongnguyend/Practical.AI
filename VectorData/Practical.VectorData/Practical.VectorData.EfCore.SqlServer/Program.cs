@@ -10,23 +10,21 @@ using var dbContext = new TestDbContext(configuration["ConnectionStrings:SqlServ
 await dbContext.Database.EnsureDeletedAsync();
 await dbContext.Database.EnsureCreatedAsync();
 
-var blogs = new[] {
-    new Blog
-    {
-        Description = "This is a blog about AI and machine learning.",
-        Embedding = new SqlVector<float>(new float[] { 0.1f, 0.2f, 0.3f })
-    },
-    new Blog
-    {
-        Description = "This is a blog about animals and plants.",
-        Embedding = new SqlVector < float >(new float[] { 99.1f, 50f, 3f }),
-    },
-    new Blog
-    {
-        Description = "This is a blog about sports and outdoor activities.",
-        Embedding = new SqlVector < float >(new float[] { 3f, 60f, 240f }),
-    }
+var blogTemplates = new[]
+{
+    new { Description = "This is a blog about AI and machine learning.",      Embedding = new float[] { 0.1f, 0.2f, 0.3f } },
+    new { Description = "This is a blog about animals and plants.",           Embedding = new float[] { 99.1f, 50f, 3f } },
+    new { Description = "This is a blog about sports and outdoor activities.", Embedding = new float[] { 3f, 60f, 240f } },
 };
+
+var blogs = new[] { "tenant-1", "tenant-2", "tenant-3" }
+    .SelectMany(tenantId => blogTemplates.Select(t => new Blog
+    {
+        TenantId = tenantId,
+        Description = t.Description,
+        Embedding = new SqlVector<float>(t.Embedding)
+    }))
+    .ToArray();
 
 dbContext.Blogs.AddRange(blogs);
 await dbContext.SaveChangesAsync();
@@ -34,6 +32,7 @@ await dbContext.SaveChangesAsync();
 var queryEmbedding = new SqlVector<float>(new float[] { 0.1f, 0.2f, 0.3f });
 
 var query = dbContext.Blogs
+    .Where(p => p.TenantId == "tenant-1")
     .OrderBy(p => EF.Functions.VectorDistance("cosine", p.Embedding, queryEmbedding))
     .Take(5);
 
@@ -48,6 +47,8 @@ foreach (var result in await query.ToArrayAsync())
 public class Blog
 {
     public int Id { get; set; }
+
+    public required string TenantId { get; set; }
 
     public required string Description { get; set; }
 
@@ -78,6 +79,8 @@ public class TestDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<Blog>().Property(p => p.TenantId).HasMaxLength(256);
+        modelBuilder.Entity<Blog>().HasIndex(p => p.TenantId);
         modelBuilder.Entity<Blog>().Property(p => p.Embedding).HasColumnType("vector(3)");
     }
 }
