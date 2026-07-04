@@ -28,12 +28,10 @@ ChatClient client = options.CreateChatClient();
 var searchFunctions = new SearchFunctions(options);
 var memoryFunctions = new MemoryFunctions(Path.Combine(AppContext.BaseDirectory, "user_memory.json"));
 
-#pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 var skillsProvider = new AgentSkillsProvider(
     Path.Combine(AppContext.BaseDirectory, "skills"),
     RunScriptAsync
     );
-#pragma warning restore MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 
 var agent = client.AsAIAgent(new ChatClientAgentOptions
 {
@@ -86,7 +84,6 @@ static OpenAIOptions GetOpenAIOptions(IConfiguration configuration)
     return options;
 }
 
-#pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 static async Task<object?> RunScriptAsync(AgentFileSkill skill, AgentFileSkillScript script, JsonElement? arguments, IServiceProvider? serviceProvider, CancellationToken cancellationToken)
 {
     var psi = new ProcessStartInfo("powershell")
@@ -113,7 +110,6 @@ static async Task<object?> RunScriptAsync(AgentFileSkill skill, AgentFileSkillSc
     await process.WaitForExitAsync();
     return output.Trim();
 }
-#pragma warning restore MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 
 static async Task<IList<McpClientTool>> GetMcpToolsAsync()
 {
