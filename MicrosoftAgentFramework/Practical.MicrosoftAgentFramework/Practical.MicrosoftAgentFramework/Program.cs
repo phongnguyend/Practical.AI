@@ -33,6 +33,7 @@ var skillsProvider = new AgentSkillsProvider(
     RunScriptAsync
     );
 
+#pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 var agent = client.AsAIAgent(new ChatClientAgentOptions
 {
     Name = "SkillsAgent",
@@ -52,7 +53,14 @@ var agent = client.AsAIAgent(new ChatClientAgentOptions
     },
     AIContextProviders = [skillsProvider],
     ChatHistoryProvider = new InMemoryChatHistoryProvider()
-});
+})
+    .AsBuilder()
+    .UseToolApproval(new ToolApprovalAgentOptions
+    {
+        AutoApprovalRules = [AgentSkillsProvider.AllToolsAutoApprovalRule],
+    })
+    .Build();
+#pragma warning restore MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 
 var session = await agent.CreateSessionAsync();
 
@@ -68,6 +76,31 @@ while (true)
     var userMessage = new Microsoft.Extensions.AI.ChatMessage(ChatRole.User, userInput);
 
     var response = await agent.RunAsync(userMessage, session);
+
+    // Handle any pending approval requests (only script execution should require approval)
+    List<ToolApprovalRequestContent> approvalRequests = response.Messages
+        .SelectMany(m => m.Contents)
+        .OfType<ToolApprovalRequestContent>()
+        .ToList();
+
+    while (approvalRequests.Count > 0)
+    {
+        List<Microsoft.Extensions.AI.ChatMessage> userInputResponses = approvalRequests
+            .ConvertAll(functionApprovalRequest =>
+            {
+                var toolCall = (FunctionCallContent)functionApprovalRequest.ToolCall;
+                Console.WriteLine($"Approval required for: {toolCall.Name}. Reply Y to approve:");
+                bool approved = Console.ReadLine()?.Equals("Y", StringComparison.OrdinalIgnoreCase) ?? false;
+                return new Microsoft.Extensions.AI.ChatMessage(ChatRole.User, [functionApprovalRequest.CreateResponse(approved)]);
+            });
+
+        response = await agent.RunAsync(userInputResponses, session);
+        approvalRequests = response.Messages
+            .SelectMany(m => m.Contents)
+            .OfType<ToolApprovalRequestContent>()
+            .ToList();
+    }
+
     Console.WriteLine($"Agent: {response}");
 }
 
