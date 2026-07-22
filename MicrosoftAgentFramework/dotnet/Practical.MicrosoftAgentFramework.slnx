@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="DataIngestion/DataIngestion.csproj" />
+  <Project Path="Practical.MicrosoftAgentFramework.Shared/Practical.MicrosoftAgentFramework.Shared.csproj" />
+  <Project Path="Practical.MicrosoftAgentFramework/Practical.MicrosoftAgentFramework.csproj" />
+</Solution>
