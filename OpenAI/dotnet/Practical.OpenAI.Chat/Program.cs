@@ -41,6 +41,6 @@ while (true)
 static OpenAIOptions GetOpenAIOptions(IConfiguration configuration)
 {
     var options = new OpenAIOptions();
-    configuration.GetSection("OpenAI").Bind(options);
+    configuration.GetSection("AzureOpenAI").Bind(options);
     return options;
 }
