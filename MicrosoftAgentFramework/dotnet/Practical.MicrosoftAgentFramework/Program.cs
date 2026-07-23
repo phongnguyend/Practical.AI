@@ -33,7 +33,6 @@ var skillsProvider = new AgentSkillsProvider(
     RunScriptAsync
     );
 
-#pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 var agent = client.AsAIAgent(new ChatClientAgentOptions
 {
     Name = "SkillsAgent",
@@ -60,7 +59,6 @@ var agent = client.AsAIAgent(new ChatClientAgentOptions
         AutoApprovalRules = [AgentSkillsProvider.AllToolsAutoApprovalRule],
     })
     .Build();
-#pragma warning restore MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 
 var session = await agent.CreateSessionAsync();
 
