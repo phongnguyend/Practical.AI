@@ -14,6 +14,6 @@ internal class Chunk
     [VectorStoreData]
     public required string documentid { get; set; }
 
-    [VectorStoreVector(Dimensions: 1536, DistanceFunction = DistanceFunction.CosineDistance)]
+    [VectorStoreVector(dimensions: 1536, DistanceFunction = DistanceFunction.CosineDistance)]
     public ReadOnlyMemory<float>? embedding { get; set; }
 }
