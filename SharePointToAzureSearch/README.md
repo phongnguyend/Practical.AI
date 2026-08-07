@@ -23,6 +23,44 @@ Create these resources before deploying:
 
 Assign Azure RBAC appropriate to each process: Service Bus Data Sender to the API; Service Bus Data Receiver, Storage Blob Data Contributor, Search Index Data Contributor, Search Service Contributor, and Cognitive Services OpenAI User to the worker. Add Cognitive Services User when Document Intelligence is enabled.
 
+Infrastructure is split into two deployments. `main.bicep` deploys the shared Azure services, Azure Container Registry, Log Analytics, and the Container Apps environment:
+
+```powershell
+$deployment = az deployment group create `
+  --resource-group <resource-group> `
+  --template-file infra/main.bicep `
+  --parameters namePrefix=<unique-prefix> | ConvertFrom-Json
+
+$registry = $deployment.properties.outputs.containerRegistryName.value
+```
+
+After that deployment succeeds, run `container-apps.bicep` once to create the Container App shells, managed identities, ACR pull access, and service role assignments against the existing resources:
+
+```powershell
+az deployment group create `
+  --resource-group <resource-group> `
+  --template-file infra/container-apps.bicep `
+  --parameters namePrefix=<unique-prefix>
+```
+
+Pass the same `deployDocumentIntelligence=true` value to both deployments when Document Intelligence is required. The Container Apps are created at zero scale with Microsoft's public quickstart placeholder. Do not routinely rerun `container-apps.bicep` after releasing application revisions because it declares the placeholder as its initial desired image. `main.bicep` can be rerun independently without changing the Container Apps.
+
+Bicep does not deploy this project's images, secrets, or runtime environment variables. Build the application images separately:
+
+```powershell
+az acr build --registry $registry --image sharepoint-api:v1 `
+  --file src/SharePointToAzureSearch.Api/Dockerfile .
+
+az acr build --registry $registry --image sharepoint-worker:v1 `
+  --file src/SharePointToAzureSearch.Background/Dockerfile .
+```
+
+Deploy the built images and application configuration with a separate release pipeline or `az containerapp update`. The API image listens on port `8080`, so that release must also change the API ingress target port from the placeholder's port `80` to `8080`.
+
+The API and worker receive separate system-assigned identities. Bicep grants the API Service Bus Data Sender and grants the worker Service Bus Data Receiver, Storage Blob Data Contributor, Search Index Data Contributor, Search Service Contributor, and Cognitive Services OpenAI User. A separate user-assigned identity has only `AcrPull` and is attached to both Container Apps for private image retrieval. Set `deployDocumentIntelligence=true` to include Document Intelligence and its worker role assignment.
+
+Local/key authentication is enabled by default so services can still use their `UsedManagedIdentity: false` fallback. Disable the corresponding `allow*LocalAuth` or `allow*ApiKeyAuth` parameters for managed-identity-only deployments. The templates output endpoints, app URLs, registry details, and identity object IDs, but deliberately do not output connection strings or keys.
+
 ## Configure and run
 
 Replace the placeholders in both `appsettings.json` files or use environment variables (recommended in deployments), for example:

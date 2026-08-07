@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+.azure-cli-verify/
+.build-verify/
+.git/
+.gitignore
+.vs/
+.vscode/
+infra/
+README.md
