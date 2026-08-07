@@ -37,10 +37,13 @@ $registry = $deployment.properties.outputs.containerRegistryName.value
 After that deployment succeeds, run `container-apps.bicep` once to create the Container App shells, managed identities, ACR pull access, and service role assignments against the existing resources:
 
 ```powershell
-az deployment group create `
+$appsDeployment = az deployment group create `
   --resource-group <resource-group> `
   --template-file infra/container-apps.bicep `
-  --parameters namePrefix=<unique-prefix>
+  --parameters namePrefix=<unique-prefix> | ConvertFrom-Json
+
+$apiApp = $appsDeployment.properties.outputs.apiContainerAppName.value
+$workerApp = $appsDeployment.properties.outputs.workerContainerAppName.value
 ```
 
 Pass the same `deployDocumentIntelligence=true` value to both deployments when Document Intelligence is required. The Container Apps are created at zero scale with Microsoft's public quickstart placeholder. Do not routinely rerun `container-apps.bicep` after releasing application revisions because it declares the placeholder as its initial desired image. `main.bicep` can be rerun independently without changing the Container Apps.
@@ -55,7 +58,43 @@ az acr build --registry $registry --image sharepoint-worker:v1 `
   --file src/SharePointToAzureSearch.Background/Dockerfile .
 ```
 
-Deploy the built images and application configuration with a separate release pipeline or `az containerapp update`. The API image listens on port `8080`, so that release must also change the API ingress target port from the placeholder's port `80` to `8080`.
+Configure the application secrets and environment variables first, either in the same release pipeline or with `az containerapp secret set` and `az containerapp update --set-env-vars`. Then deploy the newly built images and activate the application replicas:
+
+```powershell
+$registryServer = $deployment.properties.outputs.containerRegistryLoginServer.value
+
+az containerapp update `
+  --resource-group <resource-group> `
+  --name $apiApp `
+  --image "$registryServer/sharepoint-api:v1" `
+  --set-env-vars "ServiceBus__UsedManagedIdentity=true" `
+  --cpu 0.5 `
+  --memory 1Gi `
+  --min-replicas 1 `
+  --max-replicas 3
+
+az containerapp ingress update `
+  --resource-group <resource-group> `
+  --name $apiApp `
+  --target-port 8080
+
+az containerapp update `
+  --resource-group <resource-group> `
+  --name $workerApp `
+  --image "$registryServer/sharepoint-worker:v1" `
+  --set-env-vars `
+    "ServiceBus__UsedManagedIdentity=true" `
+    "Storage__UsedManagedIdentity=true" `
+    "AzureSearch__UsedManagedIdentity=true" `
+    "AzureOpenAI__UsedManagedIdentity=true" `
+    "DocumentIntelligence__UsedManagedIdentity=true" `
+  --cpu 1.0 `
+  --memory 2Gi `
+  --min-replicas 1 `
+  --max-replicas 1
+```
+
+The exact setting name is `UsedManagedIdentity`, matching the .NET options classes. These flags select managed-identity authentication but do not replace the required service endpoints, resource names, SharePoint settings, or application secrets.
 
 The API and worker receive separate system-assigned identities. Bicep grants the API Service Bus Data Sender and grants the worker Service Bus Data Receiver, Storage Blob Data Contributor, Search Index Data Contributor, Search Service Contributor, and Cognitive Services OpenAI User. A separate user-assigned identity has only `AcrPull` and is attached to both Container Apps for private image retrieval. Set `deployDocumentIntelligence=true` to include Document Intelligence and its worker role assignment.
 
