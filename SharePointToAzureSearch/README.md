@@ -26,10 +26,42 @@ Assign Azure RBAC appropriate to each process: Service Bus Data Sender to the AP
 Infrastructure is split into two deployments. `main.bicep` deploys the shared Azure services, Azure Container Registry, Log Analytics, and the Container Apps environment:
 
 ```powershell
+$resourceGroup = '<resource-group>'
+$location = '<azure-region>'
+$namePrefix = '<unique-prefix>'
+$deployDocumentIntelligence = 'false'
+$imageTag = 'v1'
+
+$apiImageRepository = 'sharepoint-api'
+$workerImageRepository = 'sharepoint-worker'
+$serviceBusTopicName = 'sharepoint-changes'
+$serviceBusSubscriptionName = 'search-indexer'
+$stateContainerName = 'sharepoint-search-state'
+$searchIndexName = 'sharepoint-files'
+$vectorDimensions = 1536
+$embeddingDeploymentName = 'text-embedding-3-small'
+
+$apiTargetPort = 8080
+$apiCpu = 0.5
+$apiMemory = '1Gi'
+$apiMinReplicas = 1
+$apiMaxReplicas = 3
+$workerCpu = 1.0
+$workerMemory = '2Gi'
+$workerMinReplicas = 1
+$workerMaxReplicas = 1
+
 $deployment = az deployment group create `
-  --resource-group <resource-group> `
+  --resource-group $resourceGroup `
   --template-file infra/main.bicep `
-  --parameters namePrefix=<unique-prefix> | ConvertFrom-Json
+  --parameters `
+    namePrefix=$namePrefix `
+    location=$location `
+    deployDocumentIntelligence=$deployDocumentIntelligence `
+    serviceBusTopicName=$serviceBusTopicName `
+    serviceBusSubscriptionName=$serviceBusSubscriptionName `
+    stateContainerName=$stateContainerName `
+    embeddingDeploymentName=$embeddingDeploymentName | ConvertFrom-Json
 
 $registry = $deployment.properties.outputs.containerRegistryName.value
 ```
@@ -38,9 +70,12 @@ After that deployment succeeds, run `container-apps.bicep` once to create the Co
 
 ```powershell
 $appsDeployment = az deployment group create `
-  --resource-group <resource-group> `
+  --resource-group $resourceGroup `
   --template-file infra/container-apps.bicep `
-  --parameters namePrefix=<unique-prefix> | ConvertFrom-Json
+  --parameters `
+    namePrefix=$namePrefix `
+    location=$location `
+    deployDocumentIntelligence=$deployDocumentIntelligence | ConvertFrom-Json
 
 $apiApp = $appsDeployment.properties.outputs.apiContainerAppName.value
 $workerApp = $appsDeployment.properties.outputs.workerContainerAppName.value
@@ -48,13 +83,13 @@ $workerApp = $appsDeployment.properties.outputs.workerContainerAppName.value
 
 Pass the same `deployDocumentIntelligence=true` value to both deployments when Document Intelligence is required. The Container Apps are created at zero scale with Microsoft's public quickstart placeholder. Do not routinely rerun `container-apps.bicep` after releasing application revisions because it declares the placeholder as its initial desired image. `main.bicep` can be rerun independently without changing the Container Apps.
 
-Bicep does not deploy this project's images, secrets, or runtime environment variables. Build the application images separately:
+Bicep does not deploy this project's images, SharePoint settings, or application secrets. Build the application images separately:
 
 ```powershell
-az acr build --registry $registry --image sharepoint-api:v1 `
+az acr build --registry $registry --image "${apiImageRepository}:$imageTag" `
   --file src/SharePointToAzureSearch.Api/Dockerfile .
 
-az acr build --registry $registry --image sharepoint-worker:v1 `
+az acr build --registry $registry --image "${workerImageRepository}:$imageTag" `
   --file src/SharePointToAzureSearch.Background/Dockerfile .
 ```
 
@@ -64,37 +99,37 @@ Configure the application secrets and environment variables first, either in the
 $registryServer = $deployment.properties.outputs.containerRegistryLoginServer.value
 
 az containerapp update `
-  --resource-group <resource-group> `
+  --resource-group $resourceGroup `
   --name $apiApp `
-  --image "$registryServer/sharepoint-api:v1" `
+  --image "${registryServer}/${apiImageRepository}:$imageTag" `
   --set-env-vars `
-    "ServiceBus__TopicName=sharepoint-changes" `
-    "ServiceBus__SubscriptionName=search-indexer" `
-  --cpu 0.5 `
-  --memory 1Gi `
-  --min-replicas 1 `
-  --max-replicas 3
+    "ServiceBus__TopicName=$serviceBusTopicName" `
+    "ServiceBus__SubscriptionName=$serviceBusSubscriptionName" `
+  --cpu $apiCpu `
+  --memory $apiMemory `
+  --min-replicas $apiMinReplicas `
+  --max-replicas $apiMaxReplicas
 
 az containerapp ingress update `
-  --resource-group <resource-group> `
+  --resource-group $resourceGroup `
   --name $apiApp `
-  --target-port 8080
+  --target-port $apiTargetPort
 
 az containerapp update `
-  --resource-group <resource-group> `
+  --resource-group $resourceGroup `
   --name $workerApp `
-  --image "$registryServer/sharepoint-worker:v1" `
+  --image "${registryServer}/${workerImageRepository}:$imageTag" `
   --set-env-vars `
-    "ServiceBus__TopicName=sharepoint-changes" `
-    "ServiceBus__SubscriptionName=search-indexer" `
-    "Storage__ContainerName=sharepoint-search-state" `
-    "AzureSearch__IndexName=sharepoint-files" `
-    "AzureSearch__VectorDimensions=1536" `
-    "AzureOpenAI__EmbeddingDeployment=text-embedding-3-small" `
-  --cpu 1.0 `
-  --memory 2Gi `
-  --min-replicas 1 `
-  --max-replicas 1
+    "ServiceBus__TopicName=$serviceBusTopicName" `
+    "ServiceBus__SubscriptionName=$serviceBusSubscriptionName" `
+    "Storage__ContainerName=$stateContainerName" `
+    "AzureSearch__IndexName=$searchIndexName" `
+    "AzureSearch__VectorDimensions=$vectorDimensions" `
+    "AzureOpenAI__EmbeddingDeployment=$embeddingDeploymentName" `
+  --cpu $workerCpu `
+  --memory $workerMemory `
+  --min-replicas $workerMinReplicas `
+  --max-replicas $workerMaxReplicas
 ```
 
 `container-apps.bicep` configures `UsedManagedIdentity=true` and discoverable Azure service endpoints. The release pipeline supplies topic, subscription, container, index, vector-dimension, and model-deployment settings alongside the SharePoint settings and application secrets.
