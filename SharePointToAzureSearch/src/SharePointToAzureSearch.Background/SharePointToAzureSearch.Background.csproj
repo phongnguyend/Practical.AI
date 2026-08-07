@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-SharePointToAzureSearch.Background-aa86af98-b197-450b-8db6-45521bab965d</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SharePointToAzureSearch.Core\SharePointToAzureSearch.Core.csproj" />
+  </ItemGroup>
+</Project>

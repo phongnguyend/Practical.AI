@@ -1,0 +1,22 @@
+@SharePointToAzureSearch_Api_HostAddress = http://localhost:5080
+
+GET {{SharePointToAzureSearch_Api_HostAddress}}/health
+Accept: application/json
+
+### Microsoft Graph validation handshake
+POST {{SharePointToAzureSearch_Api_HostAddress}}/api/sharepoint/webhook?validationToken=test-token
+
+### Example change notification
+POST {{SharePointToAzureSearch_Api_HostAddress}}/api/sharepoint/webhook
+Content-Type: application/json
+
+{
+  "value": [
+    {
+      "subscriptionId": "example-subscription",
+      "clientState": "REPLACE_WITH_A_LONG_RANDOM_SECRET",
+      "changeType": "updated",
+      "resource": "drives/example/root"
+    }
+  ]
+}

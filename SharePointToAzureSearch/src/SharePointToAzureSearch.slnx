@@ -1,0 +1,12 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="SharePointToAzureSearch.Api/SharePointToAzureSearch.Api.csproj" />
+    <Project Path="SharePointToAzureSearch.Background/SharePointToAzureSearch.Background.csproj" />
+    <Project Path="SharePointToAzureSearch.Core/SharePointToAzureSearch.Core.csproj" />
+  </Folder>
+</Solution>
