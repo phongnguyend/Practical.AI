@@ -67,7 +67,9 @@ az containerapp update `
   --resource-group <resource-group> `
   --name $apiApp `
   --image "$registryServer/sharepoint-api:v1" `
-  --set-env-vars "ServiceBus__UsedManagedIdentity=true" `
+  --set-env-vars `
+    "ServiceBus__TopicName=sharepoint-changes" `
+    "ServiceBus__SubscriptionName=search-indexer" `
   --cpu 0.5 `
   --memory 1Gi `
   --min-replicas 1 `
@@ -83,18 +85,19 @@ az containerapp update `
   --name $workerApp `
   --image "$registryServer/sharepoint-worker:v1" `
   --set-env-vars `
-    "ServiceBus__UsedManagedIdentity=true" `
-    "Storage__UsedManagedIdentity=true" `
-    "AzureSearch__UsedManagedIdentity=true" `
-    "AzureOpenAI__UsedManagedIdentity=true" `
-    "DocumentIntelligence__UsedManagedIdentity=true" `
+    "ServiceBus__TopicName=sharepoint-changes" `
+    "ServiceBus__SubscriptionName=search-indexer" `
+    "Storage__ContainerName=sharepoint-search-state" `
+    "AzureSearch__IndexName=sharepoint-files" `
+    "AzureSearch__VectorDimensions=1536" `
+    "AzureOpenAI__EmbeddingDeployment=text-embedding-3-small" `
   --cpu 1.0 `
   --memory 2Gi `
   --min-replicas 1 `
   --max-replicas 1
 ```
 
-The exact setting name is `UsedManagedIdentity`, matching the .NET options classes. These flags select managed-identity authentication but do not replace the required service endpoints, resource names, SharePoint settings, or application secrets.
+`container-apps.bicep` configures `UsedManagedIdentity=true` and discoverable Azure service endpoints. The release pipeline supplies topic, subscription, container, index, vector-dimension, and model-deployment settings alongside the SharePoint settings and application secrets.
 
 The API and worker receive separate system-assigned identities. Bicep grants the API Service Bus Data Sender and grants the worker Service Bus Data Receiver, Storage Blob Data Contributor, Search Index Data Contributor, Search Service Contributor, and Cognitive Services OpenAI User. A separate user-assigned identity has only `AcrPull` and is attached to both Container Apps for private image retrieval. Set `deployDocumentIntelligence=true` to include Document Intelligence and its worker role assignment.
 

@@ -112,6 +112,16 @@ resource apiContainerApp 'Microsoft.App/containerApps@2025-01-01' = {
         {
           name: 'api-placeholder'
           image: placeholderContainerImage
+          env: [
+            {
+              name: 'ServiceBus__UsedManagedIdentity'
+              value: 'true'
+            }
+            {
+              name: 'ServiceBus__FullyQualifiedNamespace'
+              value: '${serviceBusNamespace.name}.servicebus.windows.net'
+            }
+          ]
           resources: {
             cpu: json('0.25')
             memory: '0.5Gi'
@@ -165,6 +175,48 @@ resource workerContainerApp 'Microsoft.App/containerApps@2025-01-01' = {
         {
           name: 'worker-placeholder'
           image: placeholderContainerImage
+          env: [
+            {
+              name: 'ServiceBus__UsedManagedIdentity'
+              value: 'true'
+            }
+            {
+              name: 'ServiceBus__FullyQualifiedNamespace'
+              value: '${serviceBusNamespace.name}.servicebus.windows.net'
+            }
+            {
+              name: 'Storage__UsedManagedIdentity'
+              value: 'true'
+            }
+            {
+              name: 'Storage__ServiceUri'
+              value: storageAccount.properties.primaryEndpoints.blob
+            }
+            {
+              name: 'AzureSearch__UsedManagedIdentity'
+              value: 'true'
+            }
+            {
+              name: 'AzureSearch__Endpoint'
+              value: 'https://${searchService.name}.search.windows.net'
+            }
+            {
+              name: 'AzureOpenAI__UsedManagedIdentity'
+              value: 'true'
+            }
+            {
+              name: 'AzureOpenAI__Endpoint'
+              value: openAiAccount.properties.endpoint
+            }
+            {
+              name: 'DocumentIntelligence__UsedManagedIdentity'
+              value: 'true'
+            }
+            {
+              name: 'DocumentIntelligence__Endpoint'
+              value: documentIntelligenceAccount.?properties.endpoint ?? ''
+            }
+          ]
           resources: {
             cpu: json('0.25')
             memory: '0.5Gi'
