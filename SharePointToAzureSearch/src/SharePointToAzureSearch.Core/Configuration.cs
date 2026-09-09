@@ -62,7 +62,6 @@ public sealed class OpenAiOptions
     public bool UsedManagedIdentity { get; set; }
     [Required, Url] public string Endpoint { get; set; } = "";
     [Required] public string EmbeddingDeployment { get; set; } = "text-embedding-3-small";
-    [Required] public string ApiVersion { get; set; } = "2024-10-21";
     public string? ApiKey { get; set; }
 }
 

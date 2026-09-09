@@ -104,44 +104,6 @@ public sealed class DocumentIntelligenceClient(
     }
 }
 
-public interface IEmbeddingClient
-{
-    Task<IReadOnlyList<float>> CreateAsync(string text, CancellationToken cancellationToken);
-}
-
-public sealed class AzureOpenAiEmbeddingClient(
-    HttpClient httpClient,
-    IOptions<OpenAiOptions> options,
-    IOptions<SearchOptions> searchOptions) : IEmbeddingClient
-{
-    private static readonly string[] Scopes = ["https://cognitiveservices.azure.com/.default"];
-    private readonly OpenAiOptions _options = options.Value;
-    private readonly TokenCredential? _credential = options.Value.UsedManagedIdentity
-        ? DependencyInjection.CreateManagedIdentityCredential()
-        : null;
-    private readonly int _dimensions = searchOptions.Value.VectorDimensions;
-
-    public async Task<IReadOnlyList<float>> CreateAsync(string text, CancellationToken cancellationToken)
-    {
-        var url = $"{_options.Endpoint.TrimEnd('/')}/openai/deployments/{Uri.EscapeDataString(_options.EmbeddingDeployment)}/embeddings?api-version={Uri.EscapeDataString(_options.ApiVersion)}";
-        using var request = new HttpRequestMessage(HttpMethod.Post, url)
-        {
-            Content = JsonContent.Create(new { input = text, dimensions = _dimensions })
-        };
-        if (_options.UsedManagedIdentity)
-        {
-            var token = await _credential!.GetTokenAsync(new TokenRequestContext(Scopes), cancellationToken);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
-        }
-        else request.Headers.Add("api-key", _options.ApiKey!);
-        using var response = await httpClient.SendAsync(request, cancellationToken);
-        if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException($"Azure OpenAI returned {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync(cancellationToken)}", null, response.StatusCode);
-        using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        return json.RootElement.GetProperty("data")[0].GetProperty("embedding").EnumerateArray().Select(x => x.GetSingle()).ToArray();
-    }
-}
-
 public static class TextChunker
 {
     public static IReadOnlyList<string> Split(string text, int size, int overlap)

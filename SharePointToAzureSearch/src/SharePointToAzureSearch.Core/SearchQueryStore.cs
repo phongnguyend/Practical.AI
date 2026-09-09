@@ -1,5 +1,6 @@
 using Azure.Search.Documents;
 using Azure.Search.Documents.Models;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using AzureSearchOptions = Azure.Search.Documents.SearchOptions;
 
@@ -37,7 +38,7 @@ public interface ISearchQueryStore
 
 public sealed class AzureSearchQueryStore(
     SearchClient searchClient,
-    IEmbeddingClient embeddings,
+    IEmbeddingGenerator<string, Embedding<float>> embeddings,
     GraphApiClient graph,
     ILogger<AzureSearchQueryStore> logger) : ISearchQueryStore
 {
@@ -60,12 +61,12 @@ public sealed class AzureSearchQueryStore(
 
         if (mode is SearchQueryMode.Vector or SearchQueryMode.Hybrid)
         {
-            var vector = await embeddings.CreateAsync(request.Query, cancellationToken);
+            var vector = await embeddings.GenerateVectorAsync(request.Query, cancellationToken: cancellationToken);
             options.VectorSearch = new VectorSearchOptions
             {
                 Queries =
                 {
-                    new VectorizedQuery(vector.ToArray())
+                    new VectorizedQuery(vector)
                     {
                         // Retrieve enough neighbours to still fill the requested page after skipping.
                         KNearestNeighborsCount = request.Top + request.Skip,

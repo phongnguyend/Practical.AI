@@ -1,10 +1,12 @@
 using Azure;
+using Azure.AI.OpenAI;
 using Azure.Core;
 using Azure.Identity;
 using Azure.Messaging.ServiceBus;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Storage.Blobs;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -34,8 +36,7 @@ public static class DependencyInjection
     {
         AddSearchOptions(services, configuration);
         AddOpenAiOptions(services, configuration);
-        services.AddHttpClient<AzureOpenAiEmbeddingClient>();
-        services.AddSingleton<IEmbeddingClient, AzureOpenAiEmbeddingClient>();
+        AddEmbeddingGenerator(services);
         AddSearchClient(services);
         services.AddSingleton<ISearchQueryStore, AzureSearchQueryStore>();
         return services;
@@ -75,9 +76,8 @@ public static class DependencyInjection
         services.AddMemoryCache();
         services.AddSingleton<GraphApiClient>();
         services.AddHttpClient<DocumentIntelligenceClient>();
-        services.AddHttpClient<AzureOpenAiEmbeddingClient>();
         services.AddSingleton<IContentExtractor, ContentExtractor>();
-        services.AddSingleton<IEmbeddingClient, AzureOpenAiEmbeddingClient>();
+        AddEmbeddingGenerator(services);
 
         if (serviceBusEnabled)
         {
@@ -122,8 +122,37 @@ public static class DependencyInjection
     private static void AddOpenAiOptions(IServiceCollection services, IConfiguration configuration)
     {
         services.AddOptions<OpenAiOptions>().Bind(configuration.GetSection(OpenAiOptions.SectionName)).ValidateDataAnnotations()
-            .Validate(o => o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "AzureOpenAI:ApiKey is required when UsedManagedIdentity is false.").ValidateOnStart();
+            .Validate(o => o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "AzureOpenAI:ApiKey is required when UsedManagedIdentity is false.")
+            .Validate(o => IsResourceRootEndpoint(o.Endpoint), "AzureOpenAI:Endpoint must be the resource endpoint without an API path, for example https://<resource>.services.ai.azure.com; the SDK appends the deployment path itself, so a base URL ending in /openai/v1 returns 404.").ValidateOnStart();
     }
+
+    /// <summary>
+    /// Registers the Azure OpenAI embedding generator. <c>AzureSearch:VectorDimensions</c> becomes the
+    /// generator's default dimension count, so the index definition and the embeddings cannot drift apart.
+    /// </summary>
+    private static void AddEmbeddingGenerator(IServiceCollection services)
+    {
+        services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<OpenAiOptions>>().Value;
+            var dimensions = sp.GetRequiredService<IOptions<SearchOptions>>().Value.VectorDimensions;
+
+            // The service version travels with the Azure OpenAI package rather than with configuration.
+            var clientOptions = new AzureOpenAIClientOptions();
+            var client = options.UsedManagedIdentity
+                ? new AzureOpenAIClient(new Uri(options.Endpoint), CreateManagedIdentityCredential(), clientOptions)
+                : new AzureOpenAIClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey!), clientOptions);
+            return client.GetEmbeddingClient(options.EmbeddingDeployment).AsIEmbeddingGenerator(dimensions);
+        });
+    }
+
+    /// <summary>
+    /// True when the endpoint is the resource root the Azure OpenAI SDK expects. The SDK appends the
+    /// deployment path itself, so a configured path such as the Foundry portal's <c>/openai/v1</c> base URL
+    /// would be doubled into <c>/openai/v1/openai/deployments/...</c> and return 404 on every request.
+    /// </summary>
+    private static bool IsResourceRootEndpoint(string endpoint) =>
+        !Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) || uri.AbsolutePath.Trim('/').Length == 0;
 
     private static void AddSearchClient(IServiceCollection services)
     {

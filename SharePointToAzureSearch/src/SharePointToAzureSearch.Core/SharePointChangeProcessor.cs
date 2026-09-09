@@ -1,3 +1,4 @@
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -13,7 +14,7 @@ public sealed class SharePointChangeProcessor(
     IDeltaStateStore state,
     ISearchIndexStore search,
     IContentExtractor extractor,
-    IEmbeddingClient embeddings,
+    IEmbeddingGenerator<string, Embedding<float>> embeddings,
     IOptions<ProcessorOptions> processorOptions,
     ILogger<SharePointChangeProcessor> logger) : ISharePointChangeProcessor
 {
@@ -106,7 +107,7 @@ public sealed class SharePointChangeProcessor(
             var chunks = new List<SearchChunkDocument>(textChunks.Count);
             for (var index = 0; index < textChunks.Count; index++)
             {
-                var vector = await embeddings.CreateAsync(textChunks[index], cancellationToken);
+                var vector = await embeddings.GenerateVectorAsync(textChunks[index], cancellationToken: cancellationToken);
                 chunks.Add(new SearchChunkDocument
                 {
                     Id = EncodeKey($"{driveId}:{item.Id}:{index}"),
@@ -121,7 +122,7 @@ public sealed class SharePointChangeProcessor(
                     ETag = item.ETag,
                     ChunkNumber = index,
                     Content = textChunks[index],
-                    ContentVector = vector,
+                    ContentVector = vector.ToArray(),
                     AllowedPrincipals = permissionsTask.Result.AllowedPrincipals,
                     PermissionRoles = permissionsTask.Result.Roles,
                     HasAnonymousAccess = permissionsTask.Result.HasAnonymousAccess
