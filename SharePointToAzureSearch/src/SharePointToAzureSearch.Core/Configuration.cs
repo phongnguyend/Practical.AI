@@ -80,4 +80,10 @@ public sealed class ProcessorOptions
     public bool SyncOnStartup { get; set; } = true;
     public bool ScheduledSyncEnabled { get; set; } = true;
     [Range(1, 1440)] public int ScheduledSyncMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// File extensions eligible for indexing; files with any other extension are skipped. Entries are
+    /// matched case-insensitively, with or without a leading dot.
+    /// </summary>
+    public IList<string> AllowedFileExtensions { get; set; } = [];
 }

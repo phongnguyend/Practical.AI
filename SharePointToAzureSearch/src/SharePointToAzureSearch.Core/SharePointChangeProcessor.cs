@@ -18,6 +18,7 @@ public sealed class SharePointChangeProcessor(
     ILogger<SharePointChangeProcessor> logger) : ISharePointChangeProcessor
 {
     private readonly ProcessorOptions _processor = processorOptions.Value;
+    private readonly HashSet<string> _allowedExtensions = BuildAllowedExtensions(processorOptions.Value.AllowedFileExtensions);
 
     // Serializes every trigger (Service Bus signals, the scheduled poll, and the startup sync) so a
     // single delta cursor is never advanced by two passes at once.
@@ -66,7 +67,17 @@ public sealed class SharePointChangeProcessor(
                 }
                 else if (item.IsFile)
                 {
-                    await IndexFileAsync(driveId, item, cancellationToken);
+                    if (IsIndexable(item.Name))
+                    {
+                        await IndexFileAsync(driveId, item, cancellationToken);
+                    }
+                    else
+                    {
+                        // Clears anything indexed before the file was renamed or the allow list narrowed.
+                        // Costs no more than the delete that always precedes a re-index.
+                        await search.DeleteItemAsync(driveId, item.Id, cancellationToken);
+                        logger.LogDebug("Skipped {FileName}; its extension is not in Processor:AllowedFileExtensions.", item.Name);
+                    }
                 }
             }
 
@@ -129,6 +140,17 @@ public sealed class SharePointChangeProcessor(
             await search.DeleteItemAsync(driveId, item.Id, cancellationToken);
             logger.LogWarning(ex, "Removed SharePoint file {FileName} from the index because it exceeds the configured size limit.", item.Name);
         }
+    }
+
+    private bool IsIndexable(string fileName) => _allowedExtensions.Contains(Path.GetExtension(fileName));
+
+    private static HashSet<string> BuildAllowedExtensions(IList<string> configured)
+    {
+        return configured
+            .Where(extension => !string.IsNullOrWhiteSpace(extension))
+            .Select(extension => extension.Trim())
+            .Select(extension => extension.StartsWith('.') ? extension : $".{extension}")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     private static string EncodeKey(string value) => Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(value)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
