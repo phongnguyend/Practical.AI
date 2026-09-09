@@ -95,9 +95,20 @@ public sealed class SharePointClient(
                     cancellationToken)
                     ?? throw new InvalidDataException("Microsoft Graph returned an empty user response.");
 
-                if (user.Id is { Length: > 0 } id) principals.Add($"user:{id}");
-                if (user.Mail is { Length: > 0 } mail) principals.Add($"email:{mail.ToLowerInvariant()}");
-                if (user.UserPrincipalName is { Length: > 0 } upn) principals.Add($"email:{upn.ToLowerInvariant()}");
+                if (user.Id is { Length: > 0 } id)
+                {
+                    principals.Add($"user:{id}");
+                }
+
+                if (user.Mail is { Length: > 0 } mail)
+                {
+                    principals.Add($"email:{mail.ToLowerInvariant()}");
+                }
+
+                if (user.UserPrincipalName is { Length: > 0 } upn)
+                {
+                    principals.Add($"email:{upn.ToLowerInvariant()}");
+                }
 
                 var response = await graph.Users[userId].TransitiveMemberOf
                     .GetAsync(cancellationToken: cancellationToken);
@@ -106,7 +117,9 @@ public sealed class SharePointClient(
                     foreach (var directoryObject in response.Value ?? [])
                     {
                         if (directoryObject is Group { Id: { Length: > 0 } groupId })
+                        {
                             principals.Add($"group:{groupId}");
+                        }
                     }
 
                     response = response.OdataNextLink is { Length: > 0 } nextLink
@@ -172,7 +185,10 @@ public sealed class SharePointClient(
             while ((read = await input.ReadAsync(buffer, cancellationToken)) > 0)
             {
                 if (output.Length + read > maxBytes)
+                {
                     throw new FileTooLargeException(output.Length + read, maxBytes);
+                }
+
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
             }
             return output.ToArray();
@@ -198,7 +214,11 @@ public sealed class SharePointClient(
             {
                 foreach (var permission in response.Value ?? [])
                 {
-                    foreach (var role in permission.Roles ?? []) roles.Add(role);
+                    foreach (var role in permission.Roles ?? [])
+                    {
+                        roles.Add(role);
+                    }
+
                     if (string.Equals(permission.Link?.Scope, "anonymous", StringComparison.OrdinalIgnoreCase))
                     {
                         anonymous = true;
@@ -206,7 +226,10 @@ public sealed class SharePointClient(
                     }
 
                     AddIdentitySet(permission.GrantedToV2, principals);
-                    foreach (var identity in permission.GrantedToIdentitiesV2 ?? []) AddIdentitySet(identity, principals);
+                    foreach (var identity in permission.GrantedToIdentitiesV2 ?? [])
+                    {
+                        AddIdentitySet(identity, principals);
+                    }
                 }
 
                 response = response.OdataNextLink is { Length: > 0 } nextLink
@@ -290,7 +313,11 @@ public sealed class SharePointClient(
 
     private static void AddIdentitySet(SharePointIdentitySet? identitySet, HashSet<string> principals)
     {
-        if (identitySet is null) return;
+        if (identitySet is null)
+        {
+            return;
+        }
+
         AddIdentity("user", identitySet.User, principals);
         AddIdentity("group", identitySet.Group, principals);
         AddIdentity("siteGroup", identitySet.SiteGroup, principals);
@@ -301,11 +328,20 @@ public sealed class SharePointClient(
 
     private static void AddIdentity(string kind, Identity? identity, HashSet<string> principals)
     {
-        if (identity?.Id is { Length: > 0 } id) principals.Add($"{kind}:{id}");
+        if (identity?.Id is { Length: > 0 } id)
+        {
+            principals.Add($"{kind}:{id}");
+        }
+
         if (identity is SharePointIdentity { LoginName.Length: > 0 } sharePointIdentity && sharePointIdentity.LoginName.Contains('@'))
+        {
             principals.Add($"email:{sharePointIdentity.LoginName.ToLowerInvariant()}");
+        }
+
         if (identity?.AdditionalData.TryGetValue("email", out var email) == true && email?.ToString() is { Length: > 0 } value)
+        {
             principals.Add($"email:{value.ToLowerInvariant()}");
+        }
     }
 
     private static HttpRequestException ToHttpRequestException(ApiException exception)

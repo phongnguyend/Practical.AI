@@ -27,12 +27,30 @@ public sealed class ContentExtractor(
     public async Task<string> ExtractAsync(DriveItemChange item, byte[] content, CancellationToken cancellationToken)
     {
         var extension = Path.GetExtension(item.Name);
-        if (TextExtensions.Contains(extension)) return Encoding.UTF8.GetString(content);
-        if (extension.Equals(".docx", StringComparison.OrdinalIgnoreCase)) return await ExtractDocxAsync(item, content, cancellationToken);
-        if (extension.Equals(".pptx", StringComparison.OrdinalIgnoreCase)) return await ExtractPptxAsync(item, content, cancellationToken);
-        if (extension.Equals(".xlsx", StringComparison.OrdinalIgnoreCase)) return await ExtractXlsxAsync(item, content, cancellationToken);
+        if (TextExtensions.Contains(extension))
+        {
+            return Encoding.UTF8.GetString(content);
+        }
+
+        if (extension.Equals(".docx", StringComparison.OrdinalIgnoreCase))
+        {
+            return await ExtractDocxAsync(item, content, cancellationToken);
+        }
+
+        if (extension.Equals(".pptx", StringComparison.OrdinalIgnoreCase))
+        {
+            return await ExtractPptxAsync(item, content, cancellationToken);
+        }
+
+        if (extension.Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
+        {
+            return await ExtractXlsxAsync(item, content, cancellationToken);
+        }
+
         if (!string.IsNullOrWhiteSpace(_options.Endpoint))
+        {
             return await documentIntelligence.ExtractAsync(content, cancellationToken);
+        }
 
         logger.LogWarning("No Document Intelligence endpoint is configured; indexing metadata only for {FileName}.", item.Name);
         return $"File name: {item.Name}\nContent type: {item.MimeType}\nPath: {item.ParentPath}";
@@ -91,8 +109,15 @@ public sealed class DocumentIntelligenceClient(
             await EnsureSuccessAsync(pollResponse, cancellationToken);
             using var json = await JsonDocument.ParseAsync(await pollResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
             var status = json.RootElement.GetProperty("status").GetString();
-            if (status == "succeeded") return json.RootElement.GetProperty("analyzeResult").GetProperty("content").GetString() ?? "";
-            if (status is "failed" or "canceled") throw new InvalidOperationException($"Document Intelligence analysis {status}: {json.RootElement}");
+            if (status == "succeeded")
+            {
+                return json.RootElement.GetProperty("analyzeResult").GetProperty("content").GetString() ?? "";
+            }
+
+            if (status is "failed" or "canceled")
+            {
+                throw new InvalidOperationException($"Document Intelligence analysis {status}: {json.RootElement}");
+            }
         }
         throw new TimeoutException("Document Intelligence analysis did not finish within two minutes.");
     }
@@ -104,12 +129,19 @@ public sealed class DocumentIntelligenceClient(
             var token = await _credential!.GetTokenAsync(new TokenRequestContext(Scopes), cancellationToken);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         }
-        else request.Headers.Add("Ocp-Apim-Subscription-Key", _options.ApiKey!);
+        else
+        {
+            request.Headers.Add("Ocp-Apim-Subscription-Key", _options.ApiKey!);
+        }
     }
 
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        if (response.IsSuccessStatusCode) return;
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
         throw new HttpRequestException($"Document Intelligence returned {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync(cancellationToken)}", null, response.StatusCode);
     }
 }
@@ -165,7 +197,11 @@ public sealed class MarkItDownClient(
 
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        if (response.IsSuccessStatusCode) return;
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
         throw new HttpRequestException($"MarkItDown returned {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync(cancellationToken)}", null, response.StatusCode);
     }
 }
@@ -174,15 +210,26 @@ public static class TextChunker
 {
     public static IReadOnlyList<string> Split(string text, int size, int overlap)
     {
-        if (overlap >= size) throw new ArgumentOutOfRangeException(nameof(overlap), "Overlap must be smaller than chunk size.");
+        if (overlap >= size)
+        {
+            throw new ArgumentOutOfRangeException(nameof(overlap), "Overlap must be smaller than chunk size.");
+        }
+
         text = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        if (text.Length == 0) return [""];
+        if (text.Length == 0)
+        {
+            return [""];
+        }
+
         var chunks = new List<string>();
         for (var start = 0; start < text.Length; start += size - overlap)
         {
             var length = Math.Min(size, text.Length - start);
             chunks.Add(text.Substring(start, length));
-            if (start + length >= text.Length) break;
+            if (start + length >= text.Length)
+            {
+                break;
+            }
         }
         return chunks;
     }

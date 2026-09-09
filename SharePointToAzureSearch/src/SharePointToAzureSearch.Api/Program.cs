@@ -20,10 +20,15 @@ app.MapPost("/api/sharepoint/webhook", async (
     CancellationToken cancellationToken) =>
 {
     if (request.Query.TryGetValue("validationToken", out var validationToken))
+    {
         return Results.Text(validationToken.ToString(), "text/plain", Encoding.UTF8);
+    }
 
     var envelope = await request.ReadFromJsonAsync<ChangeNotificationEnvelope>(cancellationToken);
-    if (envelope is null) return Results.BadRequest();
+    if (envelope is null)
+    {
+        return Results.BadRequest();
+    }
 
     var driveId = await sharePointClient.GetDriveIdAsync(cancellationToken);
 
@@ -68,11 +73,19 @@ static async Task<IResult> SearchAsync(
     CancellationToken cancellationToken)
 {
     if (string.IsNullOrWhiteSpace(payload.Query))
+    {
         return Results.BadRequest(new { error = "A non-empty 'query' is required." });
+    }
+
     if (payload.Top is < 1 or > 100)
+    {
         return Results.BadRequest(new { error = "'top' must be between 1 and 100." });
+    }
+
     if (payload.Skip < 0)
+    {
         return Results.BadRequest(new { error = "'skip' must not be negative." });
+    }
 
     var request = new SearchQueryRequest(payload.Query, payload.UserId, payload.Top, payload.Skip);
     var results = await store.SearchAsync(mode, request, cancellationToken);
@@ -81,7 +94,11 @@ static async Task<IResult> SearchAsync(
 
 static bool SecureEquals(string? left, string right)
 {
-    if (left is null) return false;
+    if (left is null)
+    {
+        return false;
+    }
+
     var leftBytes = Encoding.UTF8.GetBytes(left);
     var rightBytes = Encoding.UTF8.GetBytes(right);
     return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);

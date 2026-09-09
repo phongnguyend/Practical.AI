@@ -61,7 +61,9 @@ public sealed class AzureSearchIndexStore(
     {
         await DeleteItemAsync(driveId, itemId, cancellationToken);
         if (chunks.Count > 0)
+        {
             await searchClient.MergeOrUploadDocumentsAsync(chunks, cancellationToken: cancellationToken);
+        }
     }
 
     public async Task DeleteItemAsync(string driveId, string itemId, CancellationToken cancellationToken)
@@ -74,9 +76,14 @@ public sealed class AzureSearchIndexStore(
         }, cancellationToken);
         var ids = new List<string>();
         await foreach (var result in results.Value.GetResultsAsync())
+        {
             ids.Add(result.Document["id"].ToString()!);
+        }
+
         if (ids.Count > 0)
+        {
             await searchClient.DeleteDocumentsAsync("id", ids, cancellationToken: cancellationToken);
+        }
     }
 
     private static string Escape(string value) => value.Replace("'", "''", StringComparison.Ordinal);

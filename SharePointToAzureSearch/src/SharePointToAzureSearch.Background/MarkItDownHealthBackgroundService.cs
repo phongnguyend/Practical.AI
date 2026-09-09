@@ -44,14 +44,20 @@ public sealed class MarkItDownHealthBackgroundService(
         {
             await markItDown.CheckHealthAsync(stoppingToken);
             if (wasHealthy != true)
+            {
                 logger.LogInformation("MarkItDown at {Endpoint} is healthy.", _options.Endpoint);
+            }
+
             return true;
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             if (wasHealthy != false)
+            {
                 logger.LogWarning(ex, "MarkItDown at {Endpoint} is not healthy; DOCX, PPTX, and XLSX conversions will fail until it recovers.", _options.Endpoint);
+            }
+
             return false;
         }
     }

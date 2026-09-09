@@ -87,7 +87,11 @@ public sealed class SharePointChangeProcessor(
                 url = page.NextLink;
                 continue;
             }
-            if (page.DeltaLink is null) throw new InvalidDataException("Microsoft Graph delta response did not contain a delta link.");
+            if (page.DeltaLink is null)
+            {
+                throw new InvalidDataException("Microsoft Graph delta response did not contain a delta link.");
+            }
+
             await state.SetAsync(driveId, page.DeltaLink, cancellationToken);
             return;
         }
@@ -102,7 +106,10 @@ public sealed class SharePointChangeProcessor(
             await Task.WhenAll(contentTask, permissionsTask);
             var text = await extractor.ExtractAsync(item, contentTask.Result, cancellationToken);
             if (string.IsNullOrWhiteSpace(text))
+            {
                 text = $"File name: {item.Name}\nContent type: {item.MimeType}\nPath: {item.ParentPath}";
+            }
+
             var textChunks = TextChunker.Split(text, _processor.ChunkSizeCharacters, _processor.ChunkOverlapCharacters);
             var chunks = new List<SearchChunkDocument>(textChunks.Count);
             for (var index = 0; index < textChunks.Count; index++)

@@ -57,7 +57,10 @@ public sealed class AzureSearchQueryStore(
             Skip = request.Skip,
             IncludeTotalCount = true
         };
-        foreach (var field in ProjectedFields) options.Select.Add(field);
+        foreach (var field in ProjectedFields)
+        {
+            options.Select.Add(field);
+        }
 
         if (mode is SearchQueryMode.Vector or SearchQueryMode.Hybrid)
         {
@@ -109,10 +112,16 @@ public sealed class AzureSearchQueryStore(
     /// </summary>
     private async Task<string?> BuildPermissionFilterAsync(string? userId, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(userId)) return null;
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return null;
+        }
 
         var principals = await sharePointClient.GetUserPrincipalsAsync(userId, cancellationToken);
-        if (principals.Count == 0) return "hasAnonymousAccess eq true";
+        if (principals.Count == 0)
+        {
+            return "hasAnonymousAccess eq true";
+        }
 
         var values = string.Join(',', principals.Select(Escape));
         return $"hasAnonymousAccess eq true or allowedPrincipals/any(p: search.in(p, '{values}', ','))";

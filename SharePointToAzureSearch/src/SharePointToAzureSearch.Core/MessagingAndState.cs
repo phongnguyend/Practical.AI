@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Azure.Messaging.ServiceBus;
 using Azure.Storage.Blobs;
 using Microsoft.Extensions.Options;
@@ -43,7 +42,11 @@ public sealed class BlobDeltaStateStore(BlobContainerClient container) : IDeltaS
     {
         await container.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
         var blob = container.GetBlobClient(BlobName(driveId));
-        if (!await blob.ExistsAsync(cancellationToken)) return null;
+        if (!await blob.ExistsAsync(cancellationToken))
+        {
+            return null;
+        }
+
         var download = await blob.DownloadContentAsync(cancellationToken);
         return download.Value.Content.ToString();
     }
