@@ -69,6 +69,61 @@ public sealed class GraphApiClient(
         return drive.Id ?? throw new InvalidDataException("Microsoft Graph returned a document library without an ID.");
     }
 
+    /// <summary>
+    /// Resolves the principal tokens that grant a user access to indexed content: the user's own object ID,
+    /// their mail addresses, and every group they are a transitive member of. The tokens use the same shape
+    /// as <see cref="SearchChunkDocument.AllowedPrincipals"/>, so they can be compared directly in a filter.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> GetUserPrincipalsAsync(string userId, CancellationToken cancellationToken = default)
+    {
+        var cacheKey = $"SharePointUserPrincipals_{userId}";
+
+        var cacheOptions = new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10),
+            SlidingExpiration = TimeSpan.FromMinutes(5)
+        };
+
+        return await memoryCache.GetOrSetAsync<IReadOnlyList<string>>(cacheKey, async () =>
+        {
+            try
+            {
+                var principals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                var user = await graph.Users[userId].GetAsync(request =>
+                    request.QueryParameters.Select = ["id", "mail", "userPrincipalName"],
+                    cancellationToken)
+                    ?? throw new InvalidDataException("Microsoft Graph returned an empty user response.");
+
+                if (user.Id is { Length: > 0 } id) principals.Add($"user:{id}");
+                if (user.Mail is { Length: > 0 } mail) principals.Add($"email:{mail.ToLowerInvariant()}");
+                if (user.UserPrincipalName is { Length: > 0 } upn) principals.Add($"email:{upn.ToLowerInvariant()}");
+
+                var response = await graph.Users[userId].TransitiveMemberOf
+                    .GetAsync(cancellationToken: cancellationToken);
+                while (response is not null)
+                {
+                    foreach (var directoryObject in response.Value ?? [])
+                    {
+                        if (directoryObject is Group { Id: { Length: > 0 } groupId })
+                            principals.Add($"group:{groupId}");
+                    }
+
+                    response = response.OdataNextLink is { Length: > 0 } nextLink
+                        ? await graph.Users[userId].TransitiveMemberOf.WithUrl(nextLink)
+                            .GetAsync(cancellationToken: cancellationToken)
+                        : null;
+                }
+
+                return principals.Order().ToArray();
+            }
+            catch (ApiException ex)
+            {
+                throw ToHttpRequestException(ex);
+            }
+        }, cacheOptions);
+    }
+
     public async Task<DeltaPage> GetDeltaPageAsync(string? url, CancellationToken cancellationToken)
     {
         try

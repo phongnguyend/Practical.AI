@@ -178,15 +178,40 @@ dotnet run --project src/SharePointToAzureSearch.Background
 
 `Processor:SyncOnStartup` defaults to `true`, so existing documents are indexed immediately rather than waiting for the next webhook. Service Bus notifications after that advance the persisted delta checkpoint.
 
-## Permission-aware queries
+## Search endpoints
 
-Every chunk stores `allowedPrincipals`, `permissionRoles`, and `hasAnonymousAccess`. Querying applications must always add a security filter built from the signed-in user's trusted Entra identifiers; never accept principal identifiers directly from an untrusted request. A typical filter shape is:
+The API exposes the same request body over three retrieval strategies:
 
-```text
-allowedPrincipals/any(p: search.in(p, 'user:<object-id>,email:<address>')) or hasAnonymousAccess eq true
+| Endpoint | Strategy |
+| --- | --- |
+| `POST /api/search/fulltext` | Keyword search over the searchable fields |
+| `POST /api/search/vector` | Pure k-nearest-neighbour search over `contentVector` |
+| `POST /api/search/hybrid` | Keyword and vector search in one request, fused by reciprocal rank |
+
+```jsonc
+{
+  "query": "quarterly revenue",
+  "userId": "<entra-user-object-id-or-upn>", // optional
+  "top": 10,                                  // 1-100, default 10
+  "skip": 0
+}
 ```
 
-The index stores sharing/effective permission identities returned by Microsoft Graph. Validate the permission model against your SharePoint inheritance and group-expansion requirements before production use; applications that authorize through nested Entra or SharePoint groups normally need to add the caller's transitive group IDs to the query filter.
+The response carries `totalCount` and the matching chunks with their relevance `score`. `contentVector` is never projected. Vector and hybrid requests embed `query` with the same Azure OpenAI deployment used at indexing time, so both apps must point at the same model and `AzureSearch:VectorDimensions`.
+
+## Permission-aware queries
+
+Every chunk stores `allowedPrincipals`, `permissionRoles`, and `hasAnonymousAccess`. When `userId` is supplied, the endpoints resolve that user through Microsoft Graph — object ID, mail addresses, and every transitive group membership — and filter results to what the user can view:
+
+```text
+hasAnonymousAccess eq true or allowedPrincipals/any(p: search.in(p, 'user:<object-id>,email:<address>,group:<group-id>', ','))
+```
+
+Principals are resolved server-side from the user ID and cached for 10 minutes; principal identifiers are never accepted directly from the request body. This needs `User.Read.All` and `GroupMember.Read.All` (or `Directory.Read.All`) Graph application permissions in addition to the site/drive permissions used for indexing.
+
+**Omitting `userId` searches the whole index with no security filter.** The endpoints themselves are unauthenticated, so put authentication in front of them and derive `userId` from the validated caller identity rather than from client input — otherwise any caller can read every indexed document.
+
+SharePoint site groups (`siteGroup:`/`siteUser:` principals) are not Entra groups and cannot be expanded from directory membership, so grants made only through a site group are not matched. Validate the permission model against your SharePoint inheritance and group-expansion requirements before production use.
 
 ## Operational behavior
 

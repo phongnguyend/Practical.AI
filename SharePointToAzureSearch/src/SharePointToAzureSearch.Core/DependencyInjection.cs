@@ -32,15 +32,28 @@ public static class DependencyInjection
         return services;
     }
 
+    /// <summary>
+    /// Adds the full-text, vector, and hybrid query pipeline. Requires <see cref="AddWebhookServices"/> (or
+    /// another registration that supplies <see cref="GraphApiClient"/>) for the permission filter.
+    /// </summary>
+    public static IServiceCollection AddSearchQueryServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        AddSearchOptions(services, configuration);
+        AddOpenAiOptions(services, configuration);
+        services.AddHttpClient<AzureOpenAiEmbeddingClient>();
+        services.AddSingleton<IEmbeddingClient, AzureOpenAiEmbeddingClient>();
+        AddSearchClient(services);
+        services.AddSingleton<ISearchQueryStore, AzureSearchQueryStore>();
+        return services;
+    }
+
     public static IServiceCollection AddChangeProcessorServices(this IServiceCollection services, IConfiguration configuration)
     {
         AddGraphClient(services);
         AddSharePointOptions(services, configuration);
         AddServiceBusOptions(services, configuration);
-        services.AddOptions<SearchOptions>().Bind(configuration.GetSection(SearchOptions.SectionName)).ValidateDataAnnotations()
-            .Validate(o => o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "AzureSearch:ApiKey is required when UsedManagedIdentity is false.").ValidateOnStart();
-        services.AddOptions<OpenAiOptions>().Bind(configuration.GetSection(OpenAiOptions.SectionName)).ValidateDataAnnotations()
-            .Validate(o => o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "AzureOpenAI:ApiKey is required when UsedManagedIdentity is false.").ValidateOnStart();
+        AddSearchOptions(services, configuration);
+        AddOpenAiOptions(services, configuration);
         services.AddOptions<StorageOptions>().Bind(configuration.GetSection(StorageOptions.SectionName)).ValidateDataAnnotations()
             .Validate(o => o.UsedManagedIdentity ? !string.IsNullOrWhiteSpace(o.ServiceUri) : !string.IsNullOrWhiteSpace(o.ConnectionString), "Storage:ServiceUri is required with managed identity; otherwise Storage:ConnectionString is required.").ValidateOnStart();
         services.AddOptions<DocumentIntelligenceOptions>().Bind(configuration.GetSection(DocumentIntelligenceOptions.SectionName))
@@ -75,13 +88,7 @@ public static class DependencyInjection
                 ? new SearchIndexClient(new Uri(options.Endpoint), CreateManagedIdentityCredential())
                 : new SearchIndexClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey!));
         });
-        services.AddSingleton(sp =>
-        {
-            var options = sp.GetRequiredService<IOptions<SearchOptions>>().Value;
-            return options.UsedManagedIdentity
-                ? new SearchClient(new Uri(options.Endpoint), options.IndexName, CreateManagedIdentityCredential())
-                : new SearchClient(new Uri(options.Endpoint), options.IndexName, new AzureKeyCredential(options.ApiKey!));
-        });
+        AddSearchClient(services);
         services.AddSingleton<ISearchIndexStore, AzureSearchIndexStore>();
         services.AddSingleton<ISharePointChangeProcessor, SharePointChangeProcessor>();
         return services;
@@ -94,6 +101,29 @@ public static class DependencyInjection
     {
         services.AddOptions<SharePointOptions>().Bind(configuration.GetSection(SharePointOptions.SectionName)).ValidateDataAnnotations()
             .Validate(o => !o.SubscriptionRenewalEnabled || !string.IsNullOrWhiteSpace(o.NotificationUrl), "SharePoint:NotificationUrl is required when SubscriptionRenewalEnabled is true.").ValidateOnStart();
+    }
+
+    private static void AddSearchOptions(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<SearchOptions>().Bind(configuration.GetSection(SearchOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "AzureSearch:ApiKey is required when UsedManagedIdentity is false.").ValidateOnStart();
+    }
+
+    private static void AddOpenAiOptions(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<OpenAiOptions>().Bind(configuration.GetSection(OpenAiOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "AzureOpenAI:ApiKey is required when UsedManagedIdentity is false.").ValidateOnStart();
+    }
+
+    private static void AddSearchClient(IServiceCollection services)
+    {
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<SearchOptions>>().Value;
+            return options.UsedManagedIdentity
+                ? new SearchClient(new Uri(options.Endpoint), options.IndexName, CreateManagedIdentityCredential())
+                : new SearchClient(new Uri(options.Endpoint), options.IndexName, new AzureKeyCredential(options.ApiKey!));
+        });
     }
 
     private static void AddServiceBusOptions(IServiceCollection services, IConfiguration configuration)
