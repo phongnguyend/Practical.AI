@@ -39,7 +39,7 @@ public interface ISearchQueryStore
 public sealed class AzureSearchQueryStore(
     SearchClient searchClient,
     IEmbeddingGenerator<string, Embedding<float>> embeddings,
-    GraphApiClient graph,
+    SharePointClient sharePointClient,
     ILogger<AzureSearchQueryStore> logger) : ISearchQueryStore
 {
     private static readonly string[] ProjectedFields =
@@ -111,7 +111,7 @@ public sealed class AzureSearchQueryStore(
     {
         if (string.IsNullOrWhiteSpace(userId)) return null;
 
-        var principals = await graph.GetUserPrincipalsAsync(userId, cancellationToken);
+        var principals = await sharePointClient.GetUserPrincipalsAsync(userId, cancellationToken);
         if (principals.Count == 0) return "hasAnonymousAccess eq true";
 
         var values = string.Join(',', principals.Select(Escape));

@@ -14,7 +14,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 app.MapPost("/api/sharepoint/webhook", async (
     HttpRequest request,
     IChangeSignalPublisher publisher,
-    GraphApiClient graph,
+    SharePointClient sharePointClient,
     IOptions<SharePointOptions> options,
     ILogger<Program> logger,
     CancellationToken cancellationToken) =>
@@ -25,7 +25,7 @@ app.MapPost("/api/sharepoint/webhook", async (
     var envelope = await request.ReadFromJsonAsync<ChangeNotificationEnvelope>(cancellationToken);
     if (envelope is null) return Results.BadRequest();
 
-    var driveId = await graph.GetDriveIdAsync(cancellationToken);
+    var driveId = await sharePointClient.GetDriveIdAsync(cancellationToken);
 
     foreach (var notification in envelope.Value)
     {

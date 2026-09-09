@@ -14,7 +14,7 @@ public sealed class ChangeSignalListenerBackgroundService(
     ServiceBusClient serviceBus,
     ISharePointChangeProcessor changeProcessor,
     ISearchIndexStore search,
-    GraphApiClient graph,
+    SharePointClient sharePointClient,
     IOptions<ServiceBusOptions> serviceBusOptions,
     IOptions<ProcessorOptions> processorOptions,
     ILogger<ChangeSignalListenerBackgroundService> logger) : BackgroundService
@@ -53,7 +53,7 @@ public sealed class ChangeSignalListenerBackgroundService(
     private async Task ProcessMessageAsync(ProcessMessageEventArgs args)
     {
         var signal = args.Message.Body.ToObjectFromJson<SharePointChangeSignal>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        var driveId = await graph.GetDriveIdAsync(args.CancellationToken);
+        var driveId = await sharePointClient.GetDriveIdAsync(args.CancellationToken);
         if (signal is null || !string.Equals(signal.DriveId, driveId, StringComparison.Ordinal))
         {
             logger.LogWarning("Dead-lettering a change signal for an unexpected drive.");

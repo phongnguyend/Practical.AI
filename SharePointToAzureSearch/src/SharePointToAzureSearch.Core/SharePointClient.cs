@@ -9,7 +9,7 @@ using SdkSubscription = Microsoft.Graph.Models.Subscription;
 
 namespace SharePointToAzureSearch.Core;
 
-public sealed class GraphApiClient(
+public sealed class SharePointClient(
     GraphServiceClient graph,
     IMemoryCache memoryCache,
     IOptions<SharePointOptions> options)

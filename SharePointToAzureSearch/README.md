@@ -17,7 +17,7 @@ Create these resources before deploying:
 1. An Azure Service Bus namespace with the configured topic and subscription.
 2. An Azure Storage account. The state container is created automatically.
 3. Azure AI Search and an Azure OpenAI embedding deployment. The search index is created or updated automatically.
-4. Azure AI Document Intelligence, unless the allow list is narrowed to DOCX alone. DOCX and plain-text formats are extracted locally; every other format — including the default PPTX and XLSX — needs Document Intelligence, or it is indexed using metadata text only.
+4. Azure AI Document Intelligence, unless the allow list stays within the formats extracted locally. DOCX, PPTX, XLSX, and plain-text formats are read directly from the Open XML parts with no external service; every other format — PDF and images, for example — needs Document Intelligence, or it is indexed using metadata text only.
 5. An Entra application or managed identity with Microsoft Graph application access to the target site/drive. Prefer `Sites.Selected` with an explicit grant to the site; `Sites.Read.All` is the broader alternative. Admin consent is required.
 6. A public HTTPS URL for the API. Microsoft Graph must be able to call it during subscription creation. Not needed when `SharePoint:SubscriptionRenewalEnabled` is `false` and the worker polls on its schedule alone.
 
@@ -263,3 +263,4 @@ SharePoint site groups (`siteGroup:`/`siteUser:` principals) are not Entra group
 - Files over `Processor:MaxFileBytes` are skipped. Increase the limit only after considering Graph, memory, extraction, and embedding costs.
 - Only files whose extension is in `Processor:AllowedFileExtensions` are indexed; `appsettings.json` ships with `.docx`, `.pptx`, and `.xlsx`. Entries match case-insensitively, with or without a leading dot, and the worker refuses to start on an empty list rather than silently indexing nothing.
 - A file outside the allow list has any previously indexed chunks removed, so narrowing the list or renaming a file to a disallowed extension cleans the index on the next pass rather than leaving stale documents behind.
+- Open XML formats are extracted in-process from their document parts: paragraph runs for DOCX, slide text in slide order for PPTX, and cell values worksheet by worksheet for XLSX, resolved through the shared string table. Speaker notes, comments, and headers/footers are not indexed, and a numeric or date cell contributes its stored value, so a date arrives as an Excel serial number rather than a formatted string.

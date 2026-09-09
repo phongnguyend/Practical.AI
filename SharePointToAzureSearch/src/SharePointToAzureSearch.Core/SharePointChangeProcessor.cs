@@ -10,7 +10,7 @@ public interface ISharePointChangeProcessor
 }
 
 public sealed class SharePointChangeProcessor(
-    GraphApiClient graph,
+    SharePointClient sharePointClient,
     IDeltaStateStore state,
     ISearchIndexStore search,
     IContentExtractor extractor,
@@ -35,7 +35,7 @@ public sealed class SharePointChangeProcessor(
 
         try
         {
-            var driveId = await graph.GetDriveIdAsync(cancellationToken);
+            var driveId = await sharePointClient.GetDriveIdAsync(cancellationToken);
             var deltaUrl = await state.GetAsync(driveId, cancellationToken);
             try
             {
@@ -58,7 +58,7 @@ public sealed class SharePointChangeProcessor(
     {
         while (true)
         {
-            var page = await graph.GetDeltaPageAsync(url, cancellationToken);
+            var page = await sharePointClient.GetDeltaPageAsync(url, cancellationToken);
             foreach (var item in page.Items)
             {
                 if (item.IsDeleted)
@@ -97,8 +97,8 @@ public sealed class SharePointChangeProcessor(
     {
         try
         {
-            var contentTask = graph.DownloadContentAsync(item.Id, _processor.MaxFileBytes, cancellationToken);
-            var permissionsTask = graph.GetPermissionsAsync(item.Id, cancellationToken);
+            var contentTask = sharePointClient.DownloadContentAsync(item.Id, _processor.MaxFileBytes, cancellationToken);
+            var permissionsTask = sharePointClient.GetPermissionsAsync(item.Id, cancellationToken);
             await Task.WhenAll(contentTask, permissionsTask);
             var text = await extractor.ExtractAsync(item, contentTask.Result, cancellationToken);
             if (string.IsNullOrWhiteSpace(text))

@@ -22,7 +22,7 @@ public static class DependencyInjection
         AddSharePointOptions(services, configuration);
         AddServiceBusOptions(services, configuration, required: true);
         services.AddMemoryCache();
-        services.AddSingleton<GraphApiClient>();
+        services.AddSingleton<SharePointClient>();
         AddServiceBusClient(services);
         services.AddSingleton<IChangeSignalPublisher, ServiceBusChangeSignalPublisher>();
         return services;
@@ -30,7 +30,7 @@ public static class DependencyInjection
 
     /// <summary>
     /// Adds the full-text, vector, and hybrid query pipeline. Requires <see cref="AddWebhookServices"/> (or
-    /// another registration that supplies <see cref="GraphApiClient"/>) for the permission filter.
+    /// another registration that supplies <see cref="SharePointClient"/>) for the permission filter.
     /// </summary>
     public static IServiceCollection AddSearchQueryServices(this IServiceCollection services, IConfiguration configuration)
     {
@@ -74,7 +74,7 @@ public static class DependencyInjection
             .Validate(o => o.ChunkOverlapCharacters < o.ChunkSizeCharacters, "Chunk overlap must be smaller than chunk size.")
             .Validate(o => o.AllowedFileExtensions.Any(x => !string.IsNullOrWhiteSpace(x)), "Processor:AllowedFileExtensions must list at least one file extension.").ValidateOnStart();
         services.AddMemoryCache();
-        services.AddSingleton<GraphApiClient>();
+        services.AddSingleton<SharePointClient>();
         services.AddHttpClient<DocumentIntelligenceClient>();
         services.AddSingleton<IContentExtractor, ContentExtractor>();
         AddEmbeddingGenerator(services);
