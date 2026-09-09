@@ -8,7 +8,13 @@ public sealed class SharePointOptions
     [Required] public string TenantId { get; set; } = "";
     [Required] public string ClientId { get; set; } = "";
     [Required] public string ClientSecret { get; set; } = "";
-    [Required] public string DriveId { get; set; } = "";
+
+    [Required] public string SiteHostname { get; set; } = "";
+
+    [Required] public string SitePath { get; set; } = "";
+
+    [Required] public string DocumentLibraryName { get; set; } = "";
+
     [Required, Url] public string NotificationUrl { get; set; } = "";
     [Required, MinLength(16)] public string ClientState { get; set; } = "";
     [Range(1, 29)] public int SubscriptionLifetimeDays { get; set; } = 28;

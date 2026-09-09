@@ -9,8 +9,8 @@ public sealed class Worker(
     ServiceBusClient serviceBus,
     ISharePointChangeProcessor changeProcessor,
     ISearchIndexStore search,
+    GraphApiClient graph,
     IOptions<ServiceBusOptions> serviceBusOptions,
-    IOptions<SharePointOptions> sharePointOptions,
     IOptions<ProcessorOptions> processorOptions,
     ILogger<Worker> logger) : BackgroundService
 {
@@ -42,7 +42,8 @@ public sealed class Worker(
     private async Task ProcessMessageAsync(ProcessMessageEventArgs args)
     {
         var signal = args.Message.Body.ToObjectFromJson<SharePointChangeSignal>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        if (signal is null || !string.Equals(signal.DriveId, sharePointOptions.Value.DriveId, StringComparison.Ordinal))
+        var driveId = await graph.GetDriveIdAsync(args.CancellationToken);
+        if (signal is null || !string.Equals(signal.DriveId, driveId, StringComparison.Ordinal))
         {
             logger.LogWarning("Dead-lettering a change signal for an unexpected drive.");
             await args.DeadLetterMessageAsync(args.Message, "InvalidDrive", "The message driveId does not match the configured SharePoint drive.");

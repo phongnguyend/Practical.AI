@@ -1,8 +1,7 @@
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using SharePointToAzureSearch.Core;
 
-namespace SharePointToAzureSearch.Core;
+namespace SharePointToAzureSearch.Background;
 
 public sealed class SubscriptionRenewalService(
     GraphApiClient graph,
@@ -35,7 +34,7 @@ public sealed class SubscriptionRenewalService(
 
     private async Task EnsureSubscriptionAsync(CancellationToken cancellationToken)
     {
-        var resource = $"drives/{_options.DriveId}/root";
+        var resource = $"drives/{await graph.GetDriveIdAsync(cancellationToken)}/root";
         var subscriptions = await graph.ListSubscriptionsAsync(cancellationToken);
         var existing = subscriptions.FirstOrDefault(x =>
             string.Equals(x.Resource.TrimStart('/'), resource, StringComparison.OrdinalIgnoreCase) &&

@@ -4,8 +4,8 @@ This .NET 10 solution keeps a permission-aware Azure AI Search vector index sync
 
 ## Components
 
-- `SharePointToAzureSearch.Api` exposes `POST /api/sharepoint/webhook`, completes Microsoft Graph's validation handshake, validates `clientState`, and publishes change signals to an Azure Service Bus topic. After the web host starts accepting traffic, a hosted service creates the Graph subscription and renews it before expiration.
-- `SharePointToAzureSearch.Background` consumes a topic subscription. It follows the Microsoft Graph drive delta feed, downloads changed files and their effective sharing permissions, extracts/chunks text, creates Azure OpenAI embeddings, and replaces the file's search documents. Deleted files have all chunks removed.
+- `SharePointToAzureSearch.Api` exposes `POST /api/sharepoint/webhook`, completes Microsoft Graph's validation handshake, validates `clientState`, and publishes change signals to an Azure Service Bus topic.
+- `SharePointToAzureSearch.Background` consumes a topic subscription. It follows the Microsoft Graph drive delta feed, downloads changed files and their effective sharing permissions, extracts/chunks text, creates Azure OpenAI embeddings, and replaces the file's search documents. Deleted files have all chunks removed. A second hosted service creates the Graph subscription and renews it before expiration.
 - `SharePointToAzureSearch.Core` uses the Microsoft Graph .NET SDK for subscriptions, delta tracking, downloads, and permissions, and contains the Service Bus, Blob checkpoint, extraction, embedding, and search-index implementations.
 
 The webhook is intentionally only a signal. Microsoft Graph drive notifications do not contain a complete, durable list of item-level changes. A delta link is checkpointed in Blob Storage only after every returned page is indexed successfully, making retries idempotent and allowing expired delta tokens to trigger a full reconciliation.
@@ -143,7 +143,9 @@ Local/key authentication is enabled by default so services can still use their `
 Replace the placeholders in both `appsettings.json` files or use environment variables (recommended in deployments), for example:
 
 ```text
-SharePoint__DriveId
+SharePoint__SiteHostname
+SharePoint__SitePath
+SharePoint__DocumentLibraryName
 SharePoint__TenantId
 SharePoint__ClientId
 SharePoint__ClientSecret

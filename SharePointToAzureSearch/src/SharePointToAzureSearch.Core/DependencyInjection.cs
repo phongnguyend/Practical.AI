@@ -19,6 +19,7 @@ public static class DependencyInjection
         AddGraphClient(services);
         services.AddOptions<SharePointOptions>().Bind(configuration.GetSection(SharePointOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
         AddServiceBusOptions(services, configuration);
+        services.AddMemoryCache();
         services.AddSingleton<GraphApiClient>();
         services.AddSingleton(sp =>
         {
@@ -28,7 +29,6 @@ public static class DependencyInjection
                 : new ServiceBusClient(options.ConnectionString!);
         });
         services.AddSingleton<IChangeSignalPublisher, ServiceBusChangeSignalPublisher>();
-        services.AddHostedService<SubscriptionRenewalService>();
         return services;
     }
 
@@ -46,6 +46,7 @@ public static class DependencyInjection
         services.AddOptions<DocumentIntelligenceOptions>().Bind(configuration.GetSection(DocumentIntelligenceOptions.SectionName))
             .Validate(o => string.IsNullOrWhiteSpace(o.Endpoint) || o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "DocumentIntelligence:ApiKey is required when an endpoint is configured and UsedManagedIdentity is false.").ValidateOnStart();
         services.AddOptions<ProcessorOptions>().Bind(configuration.GetSection(ProcessorOptions.SectionName)).ValidateDataAnnotations().Validate(o => o.ChunkOverlapCharacters < o.ChunkSizeCharacters, "Chunk overlap must be smaller than chunk size.").ValidateOnStart();
+        services.AddMemoryCache();
         services.AddSingleton<GraphApiClient>();
         services.AddHttpClient<DocumentIntelligenceClient>();
         services.AddHttpClient<AzureOpenAiEmbeddingClient>();

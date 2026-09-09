@@ -14,29 +14,28 @@ public sealed class SharePointChangeProcessor(
     ISearchIndexStore search,
     IContentExtractor extractor,
     IEmbeddingClient embeddings,
-    IOptions<SharePointOptions> sharePointOptions,
     IOptions<ProcessorOptions> processorOptions,
     ILogger<SharePointChangeProcessor> logger) : ISharePointChangeProcessor
 {
-    private readonly SharePointOptions _sharePoint = sharePointOptions.Value;
     private readonly ProcessorOptions _processor = processorOptions.Value;
 
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
-        var deltaUrl = await state.GetAsync(_sharePoint.DriveId, cancellationToken);
+        var driveId = await graph.GetDriveIdAsync(cancellationToken);
+        var deltaUrl = await state.GetAsync(driveId, cancellationToken);
         try
         {
-            await ProcessDeltaAsync(deltaUrl, cancellationToken);
+            await ProcessDeltaAsync(driveId, deltaUrl, cancellationToken);
         }
         catch (GraphDeltaTokenExpiredException)
         {
             logger.LogWarning("The Microsoft Graph delta token expired. A full drive reconciliation will be performed.");
-            await state.ClearAsync(_sharePoint.DriveId, cancellationToken);
-            await ProcessDeltaAsync(null, cancellationToken);
+            await state.ClearAsync(driveId, cancellationToken);
+            await ProcessDeltaAsync(driveId, null, cancellationToken);
         }
     }
 
-    private async Task ProcessDeltaAsync(string? url, CancellationToken cancellationToken)
+    private async Task ProcessDeltaAsync(string driveId, string? url, CancellationToken cancellationToken)
     {
         while (true)
         {
@@ -45,12 +44,12 @@ public sealed class SharePointChangeProcessor(
             {
                 if (item.IsDeleted)
                 {
-                    await search.DeleteItemAsync(_sharePoint.DriveId, item.Id, cancellationToken);
+                    await search.DeleteItemAsync(driveId, item.Id, cancellationToken);
                     logger.LogInformation("Removed deleted SharePoint item {ItemId} from the search index.", item.Id);
                 }
                 else if (item.IsFile)
                 {
-                    await IndexFileAsync(item, cancellationToken);
+                    await IndexFileAsync(driveId, item, cancellationToken);
                 }
             }
 
@@ -60,12 +59,12 @@ public sealed class SharePointChangeProcessor(
                 continue;
             }
             if (page.DeltaLink is null) throw new InvalidDataException("Microsoft Graph delta response did not contain a delta link.");
-            await state.SetAsync(_sharePoint.DriveId, page.DeltaLink, cancellationToken);
+            await state.SetAsync(driveId, page.DeltaLink, cancellationToken);
             return;
         }
     }
 
-    private async Task IndexFileAsync(DriveItemChange item, CancellationToken cancellationToken)
+    private async Task IndexFileAsync(string driveId, DriveItemChange item, CancellationToken cancellationToken)
     {
         try
         {
@@ -82,8 +81,8 @@ public sealed class SharePointChangeProcessor(
                 var vector = await embeddings.CreateAsync(textChunks[index], cancellationToken);
                 chunks.Add(new SearchChunkDocument
                 {
-                    Id = EncodeKey($"{_sharePoint.DriveId}:{item.Id}:{index}"),
-                    DriveId = _sharePoint.DriveId,
+                    Id = EncodeKey($"{driveId}:{item.Id}:{index}"),
+                    DriveId = driveId,
                     ItemId = item.Id,
                     Name = item.Name,
                     Path = item.ParentPath,
@@ -100,17 +99,17 @@ public sealed class SharePointChangeProcessor(
                     HasAnonymousAccess = permissionsTask.Result.HasAnonymousAccess
                 });
             }
-            await search.ReplaceItemAsync(_sharePoint.DriveId, item.Id, chunks, cancellationToken);
+            await search.ReplaceItemAsync(driveId, item.Id, chunks, cancellationToken);
             logger.LogInformation("Indexed {FileName} ({ItemId}) as {ChunkCount} chunks.", item.Name, item.Id, chunks.Count);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            await search.DeleteItemAsync(_sharePoint.DriveId, item.Id, cancellationToken);
+            await search.DeleteItemAsync(driveId, item.Id, cancellationToken);
             logger.LogInformation("SharePoint item {ItemId} disappeared while processing; removed it from the index.", item.Id);
         }
         catch (FileTooLargeException ex)
         {
-            await search.DeleteItemAsync(_sharePoint.DriveId, item.Id, cancellationToken);
+            await search.DeleteItemAsync(driveId, item.Id, cancellationToken);
             logger.LogWarning(ex, "Removed SharePoint file {FileName} from the index because it exceeds the configured size limit.", item.Name);
         }
     }

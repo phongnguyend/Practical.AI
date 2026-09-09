@@ -1,24 +1,80 @@
-using System.Net;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 using Microsoft.Graph;
 using Microsoft.Graph.Drives.Item.Items.Item.Delta;
 using Microsoft.Graph.Models;
 using Microsoft.Kiota.Abstractions;
-using Microsoft.Extensions.Options;
+using System.Net;
 using SdkSubscription = Microsoft.Graph.Models.Subscription;
 
 namespace SharePointToAzureSearch.Core;
 
 public sealed class GraphApiClient(
     GraphServiceClient graph,
+    IMemoryCache memoryCache,
     IOptions<SharePointOptions> options)
 {
     private readonly SharePointOptions _options = options.Value;
 
+    private async Task<Site> GetSiteAsync(CancellationToken cancellationToken = default)
+    {
+        var cacheKey = $"SharePointSite_{_options.SiteHostname}_{_options.SitePath}";
+
+        var cacheOptions = new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10),
+            SlidingExpiration = TimeSpan.FromMinutes(5)
+        };
+
+        return await memoryCache.GetOrSetAsync(cacheKey, async () =>
+        {
+            var site = await graph.Sites[$"{_options.SiteHostname}:{_options.SitePath}"]
+                .GetAsync(cancellationToken: cancellationToken);
+            return site ?? throw new InvalidDataException("Microsoft Graph returned an empty site response.");
+        }, cacheOptions);
+    }
+
+    private async Task<Drive> GetDocumentLibraryAsync(CancellationToken cancellationToken = default)
+    {
+        var cacheKey = $"SharePointDrive_{_options.SiteHostname}_{_options.SitePath}_{_options.DocumentLibraryName}";
+
+        var cacheOptions = new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10),
+            SlidingExpiration = TimeSpan.FromMinutes(5)
+        };
+
+        return await memoryCache.GetOrSetAsync(cacheKey, async () =>
+        {
+            var site = await GetSiteAsync(cancellationToken);
+
+            var drives = await graph.Sites[site.Id].Drives
+                .GetAsync(cancellationToken: cancellationToken);
+
+            var drive = (drives?.Value ?? []).FirstOrDefault(d =>
+                string.Equals(d.Name, _options.DocumentLibraryName, StringComparison.OrdinalIgnoreCase));
+
+            if (drive == null)
+            {
+                throw new InvalidOperationException($"Document library '{_options.DocumentLibraryName}' not found");
+            }
+
+            return drive;
+        }, cacheOptions);
+    }
+
+    public async Task<string> GetDriveIdAsync(CancellationToken cancellationToken = default)
+    {
+        var drive = await GetDocumentLibraryAsync(cancellationToken);
+        return drive.Id ?? throw new InvalidDataException("Microsoft Graph returned a document library without an ID.");
+    }
+
     public async Task<DeltaPage> GetDeltaPageAsync(string? url, CancellationToken cancellationToken)
     {
-        url ??= $"https://graph.microsoft.com/v1.0/drives/{Uri.EscapeDataString(_options.DriveId)}/root/delta";
         try
         {
+            url ??= $"https://graph.microsoft.com/v1.0/drives/{Uri.EscapeDataString(await GetDriveIdAsync(cancellationToken))}/root/delta";
+
             var response = await new DeltaRequestBuilder(url, graph.RequestAdapter)
                 .GetAsDeltaGetResponseAsync(cancellationToken: cancellationToken)
                 ?? throw new InvalidDataException("Microsoft Graph returned an empty delta response.");
@@ -51,7 +107,8 @@ public sealed class GraphApiClient(
     {
         try
         {
-            await using var input = await graph.Drives[_options.DriveId].Items[itemId].Content
+            var driveId = await GetDriveIdAsync(cancellationToken);
+            await using var input = await graph.Drives[driveId].Items[itemId].Content
                 .GetAsync(cancellationToken: cancellationToken)
                 ?? throw new InvalidDataException("Microsoft Graph returned an empty content stream.");
             using var output = new MemoryStream();
@@ -78,7 +135,8 @@ public sealed class GraphApiClient(
             var principals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var roles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var anonymous = false;
-            var response = await graph.Drives[_options.DriveId].Items[itemId].Permissions
+            var driveId = await GetDriveIdAsync(cancellationToken);
+            var response = await graph.Drives[driveId].Items[itemId].Permissions
                 .GetAsync(cancellationToken: cancellationToken);
 
             while (response is not null)
@@ -97,7 +155,7 @@ public sealed class GraphApiClient(
                 }
 
                 response = response.OdataNextLink is { Length: > 0 } nextLink
-                    ? await graph.Drives[_options.DriveId].Items[itemId].Permissions.WithUrl(nextLink)
+                    ? await graph.Drives[driveId].Items[itemId].Permissions.WithUrl(nextLink)
                         .GetAsync(cancellationToken: cancellationToken)
                     : null;
             }
@@ -134,11 +192,12 @@ public sealed class GraphApiClient(
     {
         try
         {
+            var driveId = await GetDriveIdAsync(cancellationToken);
             var result = await graph.Subscriptions.PostAsync(new SdkSubscription
             {
                 ChangeType = "updated",
                 NotificationUrl = _options.NotificationUrl,
-                Resource = $"drives/{_options.DriveId}/root",
+                Resource = $"drives/{driveId}/root",
                 ExpirationDateTime = expiration,
                 ClientState = _options.ClientState,
                 LatestSupportedTlsVersion = "v1_2"
