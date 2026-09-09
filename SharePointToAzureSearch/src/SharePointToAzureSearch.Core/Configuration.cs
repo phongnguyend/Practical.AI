@@ -15,7 +15,8 @@ public sealed class SharePointOptions
 
     [Required] public string DocumentLibraryName { get; set; } = "";
 
-    [Required, Url] public string NotificationUrl { get; set; } = "";
+    public bool SubscriptionRenewalEnabled { get; set; } = true;
+    [Url] public string NotificationUrl { get; set; } = "";
     [Required, MinLength(16)] public string ClientState { get; set; } = "";
     [Range(1, 29)] public int SubscriptionLifetimeDays { get; set; } = 28;
     [Range(1, 24)] public int RenewalCheckHours { get; set; } = 12;
@@ -77,4 +78,6 @@ public sealed class ProcessorOptions
     [Range(100, 8000)] public int ChunkSizeCharacters { get; set; } = 4000;
     [Range(0, 2000)] public int ChunkOverlapCharacters { get; set; } = 400;
     public bool SyncOnStartup { get; set; } = true;
+    public bool ScheduledSyncEnabled { get; set; } = true;
+    [Range(1, 1440)] public int ScheduledSyncMinutes { get; set; } = 5;
 }

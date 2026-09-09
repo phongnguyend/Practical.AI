@@ -5,14 +5,19 @@ using SharePointToAzureSearch.Core;
 
 namespace SharePointToAzureSearch.Background;
 
-public sealed class Worker(
+/// <summary>
+/// Prepares the search index, optionally runs a startup synchronization, then runs the SharePoint delta
+/// synchronization in response to change signals published by the webhook API. Passes are serialized
+/// with <see cref="ScheduledSyncBackgroundService"/> by <see cref="ISharePointChangeProcessor"/> itself.
+/// </summary>
+public sealed class ChangeSignalListenerBackgroundService(
     ServiceBusClient serviceBus,
     ISharePointChangeProcessor changeProcessor,
     ISearchIndexStore search,
     GraphApiClient graph,
     IOptions<ServiceBusOptions> serviceBusOptions,
     IOptions<ProcessorOptions> processorOptions,
-    ILogger<Worker> logger) : BackgroundService
+    ILogger<ChangeSignalListenerBackgroundService> logger) : BackgroundService
 {
     private ServiceBusProcessor? _processor;
 

@@ -17,7 +17,7 @@ public static class DependencyInjection
     public static IServiceCollection AddWebhookServices(this IServiceCollection services, IConfiguration configuration)
     {
         AddGraphClient(services);
-        services.AddOptions<SharePointOptions>().Bind(configuration.GetSection(SharePointOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        AddSharePointOptions(services, configuration);
         AddServiceBusOptions(services, configuration);
         services.AddMemoryCache();
         services.AddSingleton<GraphApiClient>();
@@ -35,7 +35,7 @@ public static class DependencyInjection
     public static IServiceCollection AddChangeProcessorServices(this IServiceCollection services, IConfiguration configuration)
     {
         AddGraphClient(services);
-        services.AddOptions<SharePointOptions>().Bind(configuration.GetSection(SharePointOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        AddSharePointOptions(services, configuration);
         AddServiceBusOptions(services, configuration);
         services.AddOptions<SearchOptions>().Bind(configuration.GetSection(SearchOptions.SectionName)).ValidateDataAnnotations()
             .Validate(o => o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "AzureSearch:ApiKey is required when UsedManagedIdentity is false.").ValidateOnStart();
@@ -89,6 +89,12 @@ public static class DependencyInjection
 
     internal static TokenCredential CreateManagedIdentityCredential() =>
         new ManagedIdentityCredential(ManagedIdentityId.SystemAssigned);
+
+    private static void AddSharePointOptions(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<SharePointOptions>().Bind(configuration.GetSection(SharePointOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => !o.SubscriptionRenewalEnabled || !string.IsNullOrWhiteSpace(o.NotificationUrl), "SharePoint:NotificationUrl is required when SubscriptionRenewalEnabled is true.").ValidateOnStart();
+    }
 
     private static void AddServiceBusOptions(IServiceCollection services, IConfiguration configuration)
     {

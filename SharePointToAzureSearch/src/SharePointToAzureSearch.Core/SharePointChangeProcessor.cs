@@ -19,19 +19,36 @@ public sealed class SharePointChangeProcessor(
 {
     private readonly ProcessorOptions _processor = processorOptions.Value;
 
+    // Serializes every trigger (Service Bus signals, the scheduled poll, and the startup sync) so a
+    // single delta cursor is never advanced by two passes at once.
+    private readonly SemaphoreSlim _gate = new(1, 1);
+
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
-        var driveId = await graph.GetDriveIdAsync(cancellationToken);
-        var deltaUrl = await state.GetAsync(driveId, cancellationToken);
+        if (!await _gate.WaitAsync(TimeSpan.Zero, cancellationToken))
+        {
+            logger.LogInformation("Another SharePoint delta synchronization is already running; waiting for it to finish.");
+            await _gate.WaitAsync(cancellationToken);
+        }
+
         try
         {
-            await ProcessDeltaAsync(driveId, deltaUrl, cancellationToken);
+            var driveId = await graph.GetDriveIdAsync(cancellationToken);
+            var deltaUrl = await state.GetAsync(driveId, cancellationToken);
+            try
+            {
+                await ProcessDeltaAsync(driveId, deltaUrl, cancellationToken);
+            }
+            catch (GraphDeltaTokenExpiredException)
+            {
+                logger.LogWarning("The Microsoft Graph delta token expired. A full drive reconciliation will be performed.");
+                await state.ClearAsync(driveId, cancellationToken);
+                await ProcessDeltaAsync(driveId, null, cancellationToken);
+            }
         }
-        catch (GraphDeltaTokenExpiredException)
+        finally
         {
-            logger.LogWarning("The Microsoft Graph delta token expired. A full drive reconciliation will be performed.");
-            await state.ClearAsync(driveId, cancellationToken);
-            await ProcessDeltaAsync(driveId, null, cancellationToken);
+            _gate.Release();
         }
     }
 

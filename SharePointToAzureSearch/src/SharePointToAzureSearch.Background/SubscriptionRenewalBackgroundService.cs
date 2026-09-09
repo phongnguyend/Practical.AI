@@ -3,16 +3,22 @@ using SharePointToAzureSearch.Core;
 
 namespace SharePointToAzureSearch.Background;
 
-public sealed class SubscriptionRenewalService(
+public sealed class SubscriptionRenewalBackgroundService(
     GraphApiClient graph,
     IOptions<SharePointOptions> options,
     IHostApplicationLifetime applicationLifetime,
-    ILogger<SubscriptionRenewalService> logger) : BackgroundService
+    ILogger<SubscriptionRenewalBackgroundService> logger) : BackgroundService
 {
     private readonly SharePointOptions _options = options.Value;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!_options.SubscriptionRenewalEnabled)
+        {
+            logger.LogInformation("Microsoft Graph webhook subscriptions are disabled; relying on the scheduled synchronization instead.");
+            return;
+        }
+
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var registration = applicationLifetime.ApplicationStarted.Register(() => started.TrySetResult());
         await started.Task.WaitAsync(stoppingToken);
