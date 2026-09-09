@@ -84,6 +84,34 @@ public sealed class DocumentIntelligenceOptions
     public string? ApiKey { get; set; }
 }
 
+public sealed class MarkItDownOptions
+{
+    public const string SectionName = "MarkItDown";
+
+    /// <summary>
+    /// Base address of the MarkItDown service, for example <c>http://localhost:8000</c>. Required, because
+    /// DOCX, PPTX, and XLSX files are converted there.
+    /// </summary>
+    [Url] public string? Endpoint { get; set; }
+
+    public string ConvertPath { get; set; } = "/convert";
+    [Required] public string HealthPath { get; set; } = "/health";
+    [Range(1, 3600)] public int TimeoutSeconds { get; set; } = 120;
+
+    /// <summary>
+    /// Whether the worker probes <see cref="HealthPath"/> as it starts and on an interval, so an
+    /// unreachable service is reported before the next file needs converting.
+    /// </summary>
+    public bool HealthCheckEnabled { get; set; } = true;
+
+    [Range(1, 1440)] public int HealthCheckMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// True when an endpoint is configured, so the client can be called.
+    /// </summary>
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(Endpoint);
+}
+
 public sealed class ProcessorOptions
 {
     public const string SectionName = "Processor";

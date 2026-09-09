@@ -17,9 +17,10 @@ Create these resources before deploying:
 1. An Azure Service Bus namespace with the configured topic and subscription.
 2. An Azure Storage account. The state container is created automatically.
 3. Azure AI Search and an Azure OpenAI embedding deployment. The search index is created or updated automatically.
-4. Azure AI Document Intelligence, unless the allow list stays within the formats extracted locally. DOCX, PPTX, XLSX, and plain-text formats are read directly from the Open XML parts with no external service; every other format — PDF and images, for example — needs Document Intelligence, or it is indexed using metadata text only.
-5. An Entra application or managed identity with Microsoft Graph application access to the target site/drive. Prefer `Sites.Selected` with an explicit grant to the site; `Sites.Read.All` is the broader alternative. Admin consent is required.
-6. A public HTTPS URL for the API. Microsoft Graph must be able to call it during subscription creation. Not needed when `SharePoint:SubscriptionRenewalEnabled` is `false` and the worker polls on its schedule alone.
+4. A MarkItDown service reachable at `MarkItDown:Endpoint`, which converts DOCX, PPTX, and XLSX to markdown. Plain-text formats are read in-process and need no service.
+5. Azure AI Document Intelligence, unless the allow list stays within the formats above. Every other format — PDF and images, for example — needs Document Intelligence, or it is indexed using metadata text only.
+6. An Entra application or managed identity with Microsoft Graph application access to the target site/drive. Prefer `Sites.Selected` with an explicit grant to the site; `Sites.Read.All` is the broader alternative. Admin consent is required.
+7. A public HTTPS URL for the API. Microsoft Graph must be able to call it during subscription creation. Not needed when `SharePoint:SubscriptionRenewalEnabled` is `false` and the worker polls on its schedule alone.
 
 Assign Azure RBAC appropriate to each process: Service Bus Data Sender to the API; Service Bus Data Receiver, Storage Blob Data Contributor, Search Index Data Contributor, Search Service Contributor, and Cognitive Services OpenAI User to the worker. Add Cognitive Services User when Document Intelligence is enabled.
 
@@ -165,6 +166,7 @@ AzureOpenAI__UsedManagedIdentity
 AzureOpenAI__Endpoint
 AzureOpenAI__EmbeddingDeployment
 DocumentIntelligence__UsedManagedIdentity
+MarkItDown__Endpoint
 ```
 
 Microsoft Graph authentication uses the SharePoint `TenantId`, `ClientId`, and `ClientSecret` settings. Store `ClientSecret` in user secrets, environment variables, or a secret store rather than committing a real value to `appsettings.json`. The Entra application needs Microsoft Graph application permissions for the target SharePoint site or drive, with admin consent.
@@ -263,4 +265,5 @@ SharePoint site groups (`siteGroup:`/`siteUser:` principals) are not Entra group
 - Files over `Processor:MaxFileBytes` are skipped. Increase the limit only after considering Graph, memory, extraction, and embedding costs.
 - Only files whose extension is in `Processor:AllowedFileExtensions` are indexed; `appsettings.json` ships with `.docx`, `.pptx`, and `.xlsx`. Entries match case-insensitively, with or without a leading dot, and the worker refuses to start on an empty list rather than silently indexing nothing.
 - A file outside the allow list has any previously indexed chunks removed, so narrowing the list or renaming a file to a disallowed extension cleans the index on the next pass rather than leaving stale documents behind.
-- Open XML formats are extracted in-process from their document parts: paragraph runs for DOCX, slide text in slide order for PPTX, and cell values worksheet by worksheet for XLSX, resolved through the shared string table. Speaker notes, comments, and headers/footers are not indexed, and a numeric or date cell contributes its stored value, so a date arrives as an Excel serial number rather than a formatted string.
+- DOCX, PPTX, and XLSX are converted to markdown by the MarkItDown service at `MarkItDown:Endpoint`, which keeps headings, lists, and tables in the indexed text. There is no local fallback: a conversion that fails leaves the file unindexed and the Service Bus message unsettled, so the normal retry path applies, and the worker refuses to start without an endpoint.
+- The worker probes `MarkItDown:HealthPath` (`/health`) as it starts and every `MarkItDown:HealthCheckMinutes` afterwards, with a 10 second timeout of its own rather than the conversion timeout. Only transitions are logged, so a healthy service is reported once and an outage logs one warning until it recovers. The probe reports and nothing more — indexing is not gated on it, and `MarkItDown:HealthCheckEnabled` turns it off.

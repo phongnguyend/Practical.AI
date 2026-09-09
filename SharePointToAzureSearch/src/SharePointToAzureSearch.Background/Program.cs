@@ -9,5 +9,6 @@ if (builder.Configuration.IsChangeSignalListenerEnabled())
     builder.Services.AddHostedService<ChangeSignalListenerBackgroundService>();
 }
 builder.Services.AddHostedService<ScheduledSyncBackgroundService>();
+builder.Services.AddHostedService<MarkItDownHealthBackgroundService>();
 
 await builder.Build().RunAsync();
