@@ -151,6 +151,7 @@ SharePoint__ClientId
 SharePoint__ClientSecret
 SharePoint__NotificationUrl
 SharePoint__ClientState
+ServiceBus__Enabled
 ServiceBus__UsedManagedIdentity
 ServiceBus__FullyQualifiedNamespace
 ServiceBus__ConnectionString
@@ -177,6 +178,43 @@ dotnet run --project src/SharePointToAzureSearch.Background
 ```
 
 `Processor:SyncOnStartup` defaults to `true`, so existing documents are indexed immediately rather than waiting for the next webhook. Service Bus notifications after that advance the persisted delta checkpoint.
+
+`Processor:ChangeSignalListenerEnabled` defaults to `true`. Set it to `false` to stop the worker from consuming change signals from the Service Bus subscription, leaving `Processor:ScheduledSyncEnabled` as the only trigger for delta synchronization.
+
+`ServiceBus:Enabled` defaults to `true` and controls whether the application uses Service Bus at all. When it is `false` no Service Bus client is created and `ServiceBus:FullyQualifiedNamespace`/`ServiceBus:ConnectionString` are not validated, so a polling-only worker can be deployed with no Service Bus settings; every feature that depends on Service Bus is switched off with it, including the change signal listener regardless of `Processor:ChangeSignalListenerEnabled`. The API requires `ServiceBus:Enabled` to be `true` and refuses to start otherwise, because its webhook endpoint publishes the change signals.
+
+## Search index schema
+
+The worker owns the index definition and applies it with `CreateOrUpdateIndex`, so `AzureSearch:IndexName` is created if missing and updated in place otherwise. That call happens when the change signal listener starts, so a worker running with `Processor:ChangeSignalListenerEnabled` or `ServiceBus:Enabled` set to `false` expects the index to exist already.
+
+One document is one chunk of one file: a file indexed as three chunks becomes three documents that share `driveId`, `itemId`, and the same file and permission metadata.
+
+| Field | Type | Attributes | Content |
+| --- | --- | --- | --- |
+| `id` | `Edm.String` | key, filterable | Base64url of `<driveId>:<itemId>:<chunkNumber>` |
+| `driveId` | `Edm.String` | filterable | Graph drive ID of the document library |
+| `itemId` | `Edm.String` | filterable | Graph `driveItem` ID of the file |
+| `name` | `Edm.String` | searchable, filterable | File name including extension |
+| `path` | `Edm.String` | searchable, filterable | Parent folder path of the file |
+| `webUrl` | `Edm.String` | retrievable | Browser URL of the file in SharePoint |
+| `mimeType` | `Edm.String` | filterable | Content type reported by Graph |
+| `size` | `Edm.Int64` | filterable, sortable | File size in bytes |
+| `lastModifiedUtc` | `Edm.DateTimeOffset` | filterable, sortable | Last modification timestamp from Graph |
+| `eTag` | `Edm.String` | filterable | Graph ETag of the file version that was indexed |
+| `chunkNumber` | `Edm.Int32` | sortable | Zero-based position of the chunk within the file |
+| `content` | `Edm.String` | searchable | Extracted text of this chunk |
+| `contentVector` | `Collection(Edm.Single)` | vector-searchable | Embedding of `content` |
+| `allowedPrincipals` | `Collection(Edm.String)` | filterable | Principals granted access to the file |
+| `permissionRoles` | `Collection(Edm.String)` | filterable | Graph permission roles on the file, such as `read` or `write` |
+| `hasAnonymousAccess` | `Edm.Boolean` | filterable | True when an anonymous sharing link exists |
+
+Every field is retrievable, and the file-level fields are copied onto each chunk so a single query can filter and render results without a second lookup. The search endpoints project a narrower set: `eTag`, `contentVector`, `allowedPrincipals`, `permissionRoles`, and `hasAnonymousAccess` back the filters but are never returned to callers.
+
+`contentVector` uses an HNSW configuration named `content-hnsw` through the `content-vector-profile` profile, with default HNSW parameters and `AzureSearch:VectorDimensions` dimensions. No analyzers, scoring profiles, suggesters, or semantic configuration are defined; fields use the default analyzer.
+
+`allowedPrincipals` holds prefixed tokens rather than raw IDs — `user:<id>`, `group:<id>`, `siteGroup:<id>`, `siteUser:<id>`, `application:<id>`, `email:<address>` (lowercased), and `anonymous` for anonymously shared files. Query-time principals are built in the same shape, so they compare directly in a filter. See [Permission-aware queries](#permission-aware-queries).
+
+Azure AI Search rejects breaking field changes on an existing index, including a change to a vector field's dimensions. Changing `AzureSearch:VectorDimensions` — or the embedding model behind it — therefore means pointing `AzureSearch:IndexName` at a new index and re-indexing from scratch rather than editing the live one.
 
 ## Search endpoints
 

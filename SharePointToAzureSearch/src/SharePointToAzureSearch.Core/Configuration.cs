@@ -25,11 +25,25 @@ public sealed class SharePointOptions
 public sealed class ServiceBusOptions
 {
     public const string SectionName = "ServiceBus";
+
+    /// <summary>
+    /// Whether Service Bus is available to this application. When false no client is registered and no
+    /// connection settings are required, so features that depend on Service Bus must stay disabled.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
     public bool UsedManagedIdentity { get; set; }
     public string? FullyQualifiedNamespace { get; set; }
     public string? ConnectionString { get; set; }
     [Required] public string TopicName { get; set; } = "sharepoint-changes";
     [Required] public string SubscriptionName { get; set; } = "search-indexer";
+
+    /// <summary>
+    /// True when the settings required to create a Service Bus client are present.
+    /// </summary>
+    public bool IsConfigured => UsedManagedIdentity
+        ? !string.IsNullOrWhiteSpace(FullyQualifiedNamespace)
+        : !string.IsNullOrWhiteSpace(ConnectionString);
 }
 
 public sealed class SearchOptions
@@ -78,6 +92,7 @@ public sealed class ProcessorOptions
     [Range(100, 8000)] public int ChunkSizeCharacters { get; set; } = 4000;
     [Range(0, 2000)] public int ChunkOverlapCharacters { get; set; } = 400;
     public bool SyncOnStartup { get; set; } = true;
+    public bool ChangeSignalListenerEnabled { get; set; } = true;
     public bool ScheduledSyncEnabled { get; set; } = true;
     [Range(1, 1440)] public int ScheduledSyncMinutes { get; set; } = 5;
 

@@ -18,16 +18,10 @@ public static class DependencyInjection
     {
         AddGraphClient(services);
         AddSharePointOptions(services, configuration);
-        AddServiceBusOptions(services, configuration);
+        AddServiceBusOptions(services, configuration, required: true);
         services.AddMemoryCache();
         services.AddSingleton<GraphApiClient>();
-        services.AddSingleton(sp =>
-        {
-            var options = sp.GetRequiredService<IOptions<ServiceBusOptions>>().Value;
-            return options.UsedManagedIdentity
-                ? new ServiceBusClient(options.FullyQualifiedNamespace!, CreateManagedIdentityCredential())
-                : new ServiceBusClient(options.ConnectionString!);
-        });
+        AddServiceBusClient(services);
         services.AddSingleton<IChangeSignalPublisher, ServiceBusChangeSignalPublisher>();
         return services;
     }
@@ -47,11 +41,28 @@ public static class DependencyInjection
         return services;
     }
 
+    /// <summary>
+    /// Reads <c>ServiceBus:Enabled</c> straight from configuration, before the options system is available,
+    /// so Service Bus clients and the features that consume them are registered together.
+    /// </summary>
+    public static bool IsServiceBusEnabled(this IConfiguration configuration) =>
+        configuration.GetValue($"{ServiceBusOptions.SectionName}:{nameof(ServiceBusOptions.Enabled)}", true);
+
+    /// <summary>
+    /// Reads <c>Processor:ChangeSignalListenerEnabled</c> the same way. The listener also needs Service Bus,
+    /// so it only runs when <see cref="IsServiceBusEnabled"/> is true as well.
+    /// </summary>
+    public static bool IsChangeSignalListenerEnabled(this IConfiguration configuration) =>
+        configuration.GetValue($"{ProcessorOptions.SectionName}:{nameof(ProcessorOptions.ChangeSignalListenerEnabled)}", true)
+        && configuration.IsServiceBusEnabled();
+
     public static IServiceCollection AddChangeProcessorServices(this IServiceCollection services, IConfiguration configuration)
     {
+        var serviceBusEnabled = configuration.IsServiceBusEnabled();
+
         AddGraphClient(services);
         AddSharePointOptions(services, configuration);
-        AddServiceBusOptions(services, configuration);
+        AddServiceBusOptions(services, configuration, required: false);
         AddSearchOptions(services, configuration);
         AddOpenAiOptions(services, configuration);
         services.AddOptions<StorageOptions>().Bind(configuration.GetSection(StorageOptions.SectionName)).ValidateDataAnnotations()
@@ -68,13 +79,10 @@ public static class DependencyInjection
         services.AddSingleton<IContentExtractor, ContentExtractor>();
         services.AddSingleton<IEmbeddingClient, AzureOpenAiEmbeddingClient>();
 
-        services.AddSingleton(sp =>
+        if (serviceBusEnabled)
         {
-            var options = sp.GetRequiredService<IOptions<ServiceBusOptions>>().Value;
-            return options.UsedManagedIdentity
-                ? new ServiceBusClient(options.FullyQualifiedNamespace!, CreateManagedIdentityCredential())
-                : new ServiceBusClient(options.ConnectionString!);
-        });
+            AddServiceBusClient(services);
+        }
         services.AddSingleton(sp =>
         {
             var options = sp.GetRequiredService<IOptions<StorageOptions>>().Value;
@@ -128,10 +136,30 @@ public static class DependencyInjection
         });
     }
 
-    private static void AddServiceBusOptions(IServiceCollection services, IConfiguration configuration)
+    /// <summary>
+    /// Binds the Service Bus settings. Connection settings are only required when Service Bus is enabled;
+    /// set <paramref name="required"/> for applications that cannot run without it.
+    /// </summary>
+    private static void AddServiceBusOptions(IServiceCollection services, IConfiguration configuration, bool required)
     {
-        services.AddOptions<ServiceBusOptions>().Bind(configuration.GetSection(ServiceBusOptions.SectionName)).ValidateDataAnnotations()
-            .Validate(o => o.UsedManagedIdentity ? !string.IsNullOrWhiteSpace(o.FullyQualifiedNamespace) : !string.IsNullOrWhiteSpace(o.ConnectionString), "ServiceBus:FullyQualifiedNamespace is required with managed identity; otherwise ServiceBus:ConnectionString is required.").ValidateOnStart();
+        var options = services.AddOptions<ServiceBusOptions>().Bind(configuration.GetSection(ServiceBusOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => !o.Enabled || o.IsConfigured, "ServiceBus:FullyQualifiedNamespace is required with managed identity; otherwise ServiceBus:ConnectionString is required.");
+        if (required)
+        {
+            options.Validate(o => o.Enabled, "ServiceBus:Enabled must be true; this application publishes SharePoint change signals to Service Bus.");
+        }
+        options.ValidateOnStart();
+    }
+
+    private static void AddServiceBusClient(IServiceCollection services)
+    {
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<ServiceBusOptions>>().Value;
+            return options.UsedManagedIdentity
+                ? new ServiceBusClient(options.FullyQualifiedNamespace!, CreateManagedIdentityCredential())
+                : new ServiceBusClient(options.ConnectionString!);
+        });
     }
 
     private static void AddGraphClient(IServiceCollection services)

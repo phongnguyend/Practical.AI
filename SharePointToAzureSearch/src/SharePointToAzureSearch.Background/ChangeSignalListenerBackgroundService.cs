@@ -23,6 +23,12 @@ public sealed class ChangeSignalListenerBackgroundService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!processorOptions.Value.ChangeSignalListenerEnabled)
+        {
+            logger.LogInformation("The SharePoint change signal listener is disabled; relying on the scheduled synchronization instead.");
+            return;
+        }
+
         await search.EnsureIndexAsync(stoppingToken);
         if (processorOptions.Value.SyncOnStartup)
         {
