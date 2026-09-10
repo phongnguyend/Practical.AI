@@ -42,6 +42,17 @@ public static class DependencyInjection
     }
 
     /// <summary>
+    /// Adds read-only access to the worker's SQL Server state — the delta checkpoints and the indexed-file
+    /// records — for operator-facing views. Nothing registered here writes to those tables.
+    /// </summary>
+    public static IServiceCollection AddIndexStateServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        AddSqlServerOptions(services, configuration);
+        services.AddSingleton<IIndexStateReader, SqlIndexStateReader>();
+        return services;
+    }
+
+    /// <summary>
     /// Reads <c>ServiceBus:Enabled</c> straight from configuration, before the options system is available,
     /// so Service Bus clients and the features that consume them are registered together.
     /// </summary>
@@ -65,8 +76,7 @@ public static class DependencyInjection
         AddServiceBusOptions(services, configuration, required: false);
         AddSearchOptions(services, configuration);
         AddOpenAiOptions(services, configuration);
-        services.AddOptions<SqlServerOptions>().Bind(configuration.GetSection(SqlServerOptions.SectionName)).ValidateDataAnnotations()
-            .Validate(o => !string.Equals(o.DeltaStateTableName, o.FileMetadataTableName, StringComparison.OrdinalIgnoreCase), "SqlServer:DeltaStateTableName and SqlServer:FileMetadataTableName must name different tables.").ValidateOnStart();
+        AddSqlServerOptions(services, configuration);
         services.AddOptions<DocumentIntelligenceOptions>().Bind(configuration.GetSection(DocumentIntelligenceOptions.SectionName))
             .Validate(o => string.IsNullOrWhiteSpace(o.Endpoint) || o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "DocumentIntelligence:ApiKey is required when an endpoint is configured and UsedManagedIdentity is false.").ValidateOnStart();
         services.AddOptions<MarkItDownOptions>().Bind(configuration.GetSection(MarkItDownOptions.SectionName)).ValidateDataAnnotations()
@@ -111,6 +121,12 @@ public static class DependencyInjection
     {
         services.AddOptions<SharePointOptions>().Bind(configuration.GetSection(SharePointOptions.SectionName)).ValidateDataAnnotations()
             .Validate(o => !o.SubscriptionRenewalEnabled || !string.IsNullOrWhiteSpace(o.NotificationUrl), "SharePoint:NotificationUrl is required when SubscriptionRenewalEnabled is true.").ValidateOnStart();
+    }
+
+    private static void AddSqlServerOptions(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<SqlServerOptions>().Bind(configuration.GetSection(SqlServerOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => !string.Equals(o.DeltaStateTableName, o.FileMetadataTableName, StringComparison.OrdinalIgnoreCase), "SqlServer:DeltaStateTableName and SqlServer:FileMetadataTableName must name different tables.").ValidateOnStart();
     }
 
     private static void AddSearchOptions(IServiceCollection services, IConfiguration configuration)

@@ -3,11 +3,25 @@ using System.Text;
 using Microsoft.Extensions.Options;
 using SharePointToAzureSearch.Core;
 
+const string FrontendCorsPolicy = "frontend";
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddWebhookServices(builder.Configuration);
 builder.Services.AddSearchQueryServices(builder.Configuration);
+builder.Services.AddIndexStateServices(builder.Configuration);
+
+// The viewer front end is served from its own origin during development. Origins are configured rather
+// than wildcarded, because these endpoints are unauthenticated and expose the whole index.
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+    ?? ["http://localhost:5173"];
+builder.Services.AddCors(options => options.AddPolicy(FrontendCorsPolicy, policy => policy
+    .WithOrigins(allowedOrigins)
+    .AllowAnyHeader()
+    .AllowAnyMethod()));
 
 var app = builder.Build();
+
+app.UseCors(FrontendCorsPolicy);
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 
@@ -63,6 +77,50 @@ app.MapPost("/api/search/hybrid", (
     SearchPayload payload,
     ISearchQueryStore store,
     CancellationToken cancellationToken) => SearchAsync(SearchQueryMode.Hybrid, payload, store, cancellationToken));
+
+// Read-only views over the worker's SQL Server state. Like the search endpoints, these are
+// unauthenticated and unfiltered, so put authentication in front of them before exposing them.
+app.MapGet("/api/state/summary", (
+    IIndexStateReader reader,
+    CancellationToken cancellationToken) => reader.GetSummaryAsync(cancellationToken));
+
+app.MapGet("/api/state/indexed-files", async (
+    IIndexStateReader reader,
+    CancellationToken cancellationToken,
+    string? search = null,
+    string? driveId = null,
+    string? sort = null,
+    bool desc = true,
+    int skip = 0,
+    int top = 25) =>
+{
+    if (top is < 1 or > 200)
+    {
+        return Results.BadRequest(new { error = "'top' must be between 1 and 200." });
+    }
+
+    if (skip < 0)
+    {
+        return Results.BadRequest(new { error = "'skip' must not be negative." });
+    }
+
+    var page = await reader.ListFilesAsync(new IndexedFileQuery(search, driveId, sort, desc, skip, top), cancellationToken);
+    return Results.Ok(page);
+});
+
+app.MapGet("/api/state/indexed-files/{driveId}/{itemId}", async (
+    string driveId,
+    string itemId,
+    IIndexStateReader reader,
+    CancellationToken cancellationToken) =>
+{
+    var file = await reader.GetFileAsync(driveId, itemId, cancellationToken);
+    return file is null ? Results.NotFound() : Results.Ok(file);
+});
+
+app.MapGet("/api/state/delta", (
+    IIndexStateReader reader,
+    CancellationToken cancellationToken) => reader.ListDeltaStateAsync(cancellationToken));
 
 app.Run();
 

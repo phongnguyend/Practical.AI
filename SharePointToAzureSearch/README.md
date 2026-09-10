@@ -4,7 +4,8 @@ This .NET 10 solution keeps a permission-aware Azure AI Search vector index sync
 
 ## Components
 
-- `SharePointToAzureSearch.Api` exposes `POST /api/sharepoint/webhook`, completes Microsoft Graph's validation handshake, validates `clientState`, and publishes change signals to an Azure Service Bus topic.
+- `SharePointToAzureSearch.Api` exposes `POST /api/sharepoint/webhook`, completes Microsoft Graph's validation handshake, validates `clientState`, and publishes change signals to an Azure Service Bus topic. It also serves the search endpoints and the read-only state endpoints the front end uses.
+- `frontend` is a React and Vite app for viewing the worker's SQL Server state and running the three retrieval strategies against the index. See [frontend/README.md](frontend/README.md).
 - `SharePointToAzureSearch.Background` consumes a topic subscription. It follows the Microsoft Graph drive delta feed and, for each file the feed returns, compares it against the metadata recorded for the last indexing run in SQL Server: an unchanged file is left alone, a renamed or re-shared file has its metadata refreshed in place, and only a file whose content actually changed is downloaded, extracted, chunked, embedded, and replaced. Deleted files have all chunks removed. Two more hosted services run alongside it: one creates the Graph subscription and renews it before expiration (`SharePoint:SubscriptionRenewalEnabled` to turn it off), and one runs the same delta synchronization every `Processor:ScheduledSyncMinutes` (5 by default, `ScheduledSyncEnabled` to turn it off) so missed notifications still get picked up. Either trigger can run without the other: disable the subscription to poll only, or disable the schedule to react only to notifications. All three triggers — notification, schedule, and startup sync — are serialized, so only one delta pass runs at a time.
 - `SharePointToAzureSearch.Core` uses the Microsoft Graph .NET SDK for subscriptions, delta tracking, downloads, and permissions, and contains the Service Bus, SQL Server state, extraction, embedding, and search-index implementations. Embeddings go through `Microsoft.Extensions.AI`'s `IEmbeddingGenerator<string, Embedding<float>>`, backed by `AzureOpenAIClient` from the Azure OpenAI SDK, so the embedding model can be swapped without touching the indexing or query code.
 
@@ -337,6 +338,31 @@ The API exposes the same request body over three retrieval strategies:
 ```
 
 The response carries `totalCount` and the matching chunks with their relevance `score`. `contentVector` is never projected. Vector and hybrid requests embed `query` with the same Azure OpenAI deployment used at indexing time, so both apps must point at the same model and `AzureSearch:VectorDimensions`.
+
+## State endpoints
+
+Read-only views over the worker's SQL Server state, for the front end and for operators. They read the database at `SqlServer:ConnectionString` and never write to it; a table that does not exist yet reads as empty, so they work before the worker's first pass.
+
+| Endpoint | Returns |
+| --- | --- |
+| `GET /api/state/summary` | Totals over `SharePointIndexedFiles` — files, chunks, source size, distinct drives, the files whose `ScanId` is not the round in the checkpoint, distinct index fingerprints, the indexing window, and a breakdown by content type |
+| `GET /api/state/indexed-files` | A page of `SharePointIndexedFiles`. `search` matches name, folder, URL, content type, or item ID; `driveId` filters exactly; `sort` is one of `name`, `path`, `mimeType`, `size`, `lastModifiedUtc`, `chunkCount`, `indexedAtUtc` with `desc`; `skip` and `top` (1-200, default 25) page it |
+| `GET /api/state/indexed-files/{driveId}/{itemId}` | One row, or 404 |
+| `GET /api/state/delta` | Every `SharePointDeltaState` row, newest checkpoint first |
+
+Like the search endpoints they are unauthenticated and unfiltered, so the same warning applies: put authentication in front of them, because between them they expose every indexed file's metadata and the Graph delta tokens.
+
+## Front end
+
+`frontend/` is a React and Vite app over these endpoints: the two state tables, and the three retrieval strategies run one at a time or all three side by side. See [frontend/README.md](frontend/README.md).
+
+```bash
+cd frontend
+npm install
+npm run dev     # http://localhost:5173, proxying /api to http://localhost:5263
+```
+
+The API must be running as well. `Cors:AllowedOrigins` lists the origins allowed to call it directly, `http://localhost:5173` by default; the dev server's proxy means the browser makes same-origin requests and does not rely on it.
 
 ## Permission-aware queries
 
