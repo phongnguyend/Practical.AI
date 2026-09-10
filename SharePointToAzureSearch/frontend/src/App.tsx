@@ -1,10 +1,20 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
-import { FileText, GitBranch, LayoutDashboard, Monitor, Moon, Search, Sun } from 'lucide-react'
+import {
+  FileText,
+  GitBranch,
+  LayoutDashboard,
+  Monitor,
+  Moon,
+  Search,
+  Sun,
+  Webhook,
+} from 'lucide-react'
 import OverviewPage from './pages/OverviewPage'
 import IndexedFilesPage from './pages/IndexedFilesPage'
 import DeltaStatePage from './pages/DeltaStatePage'
 import SearchPage from './pages/SearchPage'
+import SubscriptionsPage from './pages/SubscriptionsPage'
 
 type Theme = 'system' | 'light' | 'dark'
 
@@ -53,6 +63,10 @@ export default function App() {
             <GitBranch size={16} />
             Delta state
           </NavLink>
+          <NavLink to="/subscriptions">
+            <Webhook size={16} />
+            Subscriptions
+          </NavLink>
           <NavLink to="/search">
             <Search size={16} />
             Search
@@ -74,6 +88,7 @@ export default function App() {
           <Route path="/overview" element={<OverviewPage />} />
           <Route path="/files" element={<IndexedFilesPage />} />
           <Route path="/delta" element={<DeltaStatePage />} />
+          <Route path="/subscriptions" element={<SubscriptionsPage />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="*" element={<Navigate to="/overview" replace />} />
         </Routes>

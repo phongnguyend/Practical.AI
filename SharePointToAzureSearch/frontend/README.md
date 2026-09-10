@@ -11,6 +11,7 @@ against the search index, side by side.
 | **Overview** | Totals over the indexed-file table: files, chunks, source size, drives, files outside the current reconciliation round, and how many distinct index fingerprints are in play. Plus files by content type, the most recently indexed files, and the delta checkpoints. |
 | **Indexed files** | The `SharePointIndexedFiles` table, filterable and sortable, with a detail panel showing every recorded column — ETag, CTag, permissions hash, index fingerprint, scan ID, and the drive and item IDs. |
 | **Delta state** | The `SharePointDeltaState` table, one card per drive: the scan ID, whether that round's orphan sweep has run, when the checkpoint was last written, and the delta link itself. |
+| **Subscriptions** | The Microsoft Graph webhook subscriptions on the application registration. Shows what the worker would create, whether automatic renewal is on, and for each subscription whether its resource, notification URL, and client state match this deployment. Create, edit, renew, and delete from a dialog; deleting takes two clicks. The one on the configured `SharePoint:NotificationUrl` is marked **Default** — its URL is read-only and it cannot be deleted, because the renewal service owns it. Any other subscription can be edited freely as long as its notification URL is not already taken. |
 | **Search** | Full-text, vector, and hybrid over the same request body. **Compare all three** issues them together and reports each one's round trip, plus how much the three agree — distinct chunks returned, how many every strategy found, and how many only one strategy found. |
 
 Searches are kept in the URL (`/search?q=…&mode=compare&top=10`), so a result is a link and the
@@ -63,6 +64,14 @@ Read-only endpoints added alongside the existing search ones:
 They read the database at `SqlServer:ConnectionString` and never write to it. A table that does not
 exist yet reads as empty, so the viewer works before the worker's first pass.
 
-**These endpoints are unauthenticated, like the search endpoints, and they expose the whole index and
-every indexed file's metadata.** Put authentication in front of the API before exposing it anywhere
-but a development machine.
+The Subscriptions page additionally uses, and these **change tenant state**:
+
+- `GET /api/subscriptions`
+- `POST /api/subscriptions` — body `{ "days": 28, "notificationUrl": "https://..." }`, both optional
+- `PUT /api/subscriptions/{id}` — same body; a changed URL replaces the subscription
+- `POST /api/subscriptions/{id}/renew` — optional body `{ "days": 28 }`
+- `DELETE /api/subscriptions/{id}` — refused for the default subscription
+
+**Every one of these endpoints is unauthenticated, like the search endpoints. Between them they expose
+the whole index and all indexed metadata, and let any caller delete the webhook subscription.** Put
+authentication in front of the API before exposing it anywhere but a development machine.

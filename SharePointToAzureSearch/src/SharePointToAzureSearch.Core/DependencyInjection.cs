@@ -22,6 +22,7 @@ public static class DependencyInjection
         AddServiceBusOptions(services, configuration, required: true);
         services.AddMemoryCache();
         services.AddSingleton<SharePointClient>();
+        services.AddSingleton<SubscriptionManager>();
         AddServiceBusClient(services);
         services.AddSingleton<IChangeSignalPublisher, ServiceBusChangeSignalPublisher>();
         return services;
@@ -86,6 +87,7 @@ public static class DependencyInjection
             .Validate(o => o.AllowedFileExtensions.Any(x => !string.IsNullOrWhiteSpace(x)), "Processor:AllowedFileExtensions must list at least one file extension.").ValidateOnStart();
         services.AddMemoryCache();
         services.AddSingleton<SharePointClient>();
+        services.AddSingleton<SubscriptionManager>();
         services.AddHttpClient<DocumentIntelligenceClient>();
 
         // Conversion of a large file is a single long request, so the client carries its own timeout

@@ -4,7 +4,7 @@ using SharePointToAzureSearch.Core;
 namespace SharePointToAzureSearch.Background;
 
 public sealed class SubscriptionRenewalBackgroundService(
-    SharePointClient sharePointClient,
+    SubscriptionManager subscriptions,
     IOptions<SharePointOptions> options,
     IHostApplicationLifetime applicationLifetime,
     ILogger<SubscriptionRenewalBackgroundService> logger) : BackgroundService
@@ -40,26 +40,13 @@ public sealed class SubscriptionRenewalBackgroundService(
 
     private async Task EnsureSubscriptionAsync(CancellationToken cancellationToken)
     {
-        var resource = $"drives/{await sharePointClient.GetDriveIdAsync(cancellationToken)}/root";
-        var subscriptions = await sharePointClient.ListSubscriptionsAsync(cancellationToken);
-        var existing = subscriptions.FirstOrDefault(x =>
-            string.Equals(x.Resource.TrimStart('/'), resource, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(x.NotificationUrl, _options.NotificationUrl, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(x.ClientState, _options.ClientState, StringComparison.Ordinal));
-        var expiration = DateTimeOffset.UtcNow.AddDays(_options.SubscriptionLifetimeDays);
-        if (existing is null)
+        var (action, subscription) = await subscriptions.EnsureAsync(cancellationToken);
+        var message = action switch
         {
-            var created = await sharePointClient.CreateSubscriptionAsync(expiration, cancellationToken);
-            logger.LogInformation("Created Microsoft Graph subscription {SubscriptionId}, expiring {ExpirationUtc}.", created.Id, created.ExpirationUtc);
-        }
-        else if (existing.ExpirationUtc < DateTimeOffset.UtcNow.AddDays(3))
-        {
-            await sharePointClient.RenewSubscriptionAsync(existing.Id, expiration, cancellationToken);
-            logger.LogInformation("Renewed Microsoft Graph subscription {SubscriptionId} until {ExpirationUtc}.", existing.Id, expiration);
-        }
-        else
-        {
-            logger.LogInformation("Microsoft Graph subscription {SubscriptionId} is active until {ExpirationUtc}.", existing.Id, existing.ExpirationUtc);
-        }
+            SubscriptionAction.Created => "Created Microsoft Graph subscription {SubscriptionId}, expiring {ExpirationUtc}.",
+            SubscriptionAction.Renewed => "Renewed Microsoft Graph subscription {SubscriptionId} until {ExpirationUtc}.",
+            _ => "Microsoft Graph subscription {SubscriptionId} is active until {ExpirationUtc}."
+        };
+        logger.LogInformation(message, subscription.Id, subscription.ExpirationUtc);
     }
 }

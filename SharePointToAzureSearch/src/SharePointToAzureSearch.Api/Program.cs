@@ -4,6 +4,8 @@ using Microsoft.Extensions.Options;
 using SharePointToAzureSearch.Core;
 
 const string FrontendCorsPolicy = "frontend";
+const string NotificationUrlError =
+    "'notificationUrl' must be an absolute HTTPS URL; Microsoft Graph calls it to validate the subscription before creating it.";
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddWebhookServices(builder.Configuration);
@@ -122,7 +124,91 @@ app.MapGet("/api/state/delta", (
     IIndexStateReader reader,
     CancellationToken cancellationToken) => reader.ListDeltaStateAsync(cancellationToken));
 
+// Microsoft Graph webhook subscriptions. Unlike the endpoints above these change tenant state: removing
+// a subscription stops change notifications, leaving the drive to the scheduled synchronization alone.
+app.MapGet("/api/subscriptions", (
+    SubscriptionManager subscriptions,
+    CancellationToken cancellationToken) =>
+    CallGraphAsync(() => subscriptions.GetOverviewAsync(cancellationToken)));
+
+app.MapPost("/api/subscriptions", async (
+    CreateSubscriptionRequest? body,
+    SubscriptionManager subscriptions,
+    CancellationToken cancellationToken) =>
+{
+    var notificationUrl = string.IsNullOrWhiteSpace(body?.NotificationUrl) ? null : body!.NotificationUrl!.Trim();
+    if (notificationUrl is not null && !SubscriptionManager.IsValidNotificationUrl(notificationUrl))
+    {
+        return Results.BadRequest(new { error = NotificationUrlError });
+    }
+
+    return await CallGraphAsync(() => subscriptions.CreateAsync(body?.Days, notificationUrl, cancellationToken));
+});
+
+app.MapPost("/api/subscriptions/{id}/renew", (
+    string id,
+    SubscriptionLifetime? body,
+    SubscriptionManager subscriptions,
+    CancellationToken cancellationToken) =>
+    CallGraphAsync(() => subscriptions.RenewAsync(id, body?.Days, cancellationToken)));
+
+app.MapPut("/api/subscriptions/{id}", async (
+    string id,
+    CreateSubscriptionRequest? body,
+    SubscriptionManager subscriptions,
+    CancellationToken cancellationToken) =>
+{
+    var notificationUrl = string.IsNullOrWhiteSpace(body?.NotificationUrl) ? null : body!.NotificationUrl!.Trim();
+    if (notificationUrl is not null && !SubscriptionManager.IsValidNotificationUrl(notificationUrl))
+    {
+        return Results.BadRequest(new { error = NotificationUrlError });
+    }
+
+    return await CallGraphAsync(() => subscriptions.UpdateAsync(id, body?.Days, notificationUrl, cancellationToken));
+});
+
+app.MapDelete("/api/subscriptions/{id}", (
+    string id,
+    SubscriptionManager subscriptions,
+    CancellationToken cancellationToken) =>
+    CallGraphAsync(async () =>
+    {
+        await subscriptions.DeleteAsync(id, cancellationToken);
+        return new { deleted = id };
+    }));
+
 app.Run();
+
+/// <summary>
+/// Runs a subscription operation and maps its failures to a status the caller can act on: a rule this
+/// API enforces becomes a 4xx, and a rejection from Microsoft Graph becomes a 502 carrying Graph's own
+/// message rather than an opaque 500.
+/// </summary>
+static async Task<IResult> CallGraphAsync<T>(Func<Task<T>> call)
+{
+    try
+    {
+        return Results.Ok(await call());
+    }
+    catch (DuplicateNotificationUrlException ex)
+    {
+        return Results.Conflict(new { error = ex.Message });
+    }
+    catch (ProtectedSubscriptionException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+    catch (HttpRequestException ex)
+    {
+        return Results.Json(
+            new { error = $"Microsoft Graph rejected the request: {ex.Message}" },
+            statusCode: StatusCodes.Status502BadGateway);
+    }
+}
 
 static async Task<IResult> SearchAsync(
     SearchQueryMode mode,
@@ -167,5 +253,19 @@ static bool SecureEquals(string? left, string right)
 /// content that user is allowed to view; omitting it searches the whole index.
 /// </summary>
 public sealed record SearchPayload(string? Query, string? UserId, int Top = 10, int Skip = 0);
+
+/// <summary>
+/// How long a renewed subscription should last. Omit <see cref="Days"/> to use
+/// <c>SharePoint:SubscriptionLifetimeDays</c>; the value is clamped to what Microsoft Graph allows.
+/// </summary>
+public sealed record SubscriptionLifetime(int? Days);
+
+/// <summary>
+/// A new subscription. <see cref="NotificationUrl"/> overrides <c>SharePoint:NotificationUrl</c> for
+/// this subscription only and must be an absolute HTTPS URL that Microsoft Graph can reach; omit it to
+/// use the configured value. A URL other than the configured one produces a subscription the renewal
+/// service does not treat as its own.
+/// </summary>
+public sealed record CreateSubscriptionRequest(int? Days, string? NotificationUrl);
 
 public partial class Program;

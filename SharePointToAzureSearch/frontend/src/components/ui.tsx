@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Check,
   ChevronLeft,
@@ -8,7 +8,70 @@ import {
   Inbox,
   RefreshCw,
   TriangleAlert,
+  X,
 } from 'lucide-react'
+
+/**
+ * A modal built on the native <dialog>, so Escape, the focus trap, and the inert backdrop come from
+ * the platform rather than being reimplemented. Clicking the backdrop closes it too, which <dialog>
+ * does not do on its own.
+ */
+export function Modal({
+  open,
+  title,
+  icon,
+  onClose,
+  children,
+  footer,
+}: {
+  open: boolean
+  title: string
+  icon?: ReactNode
+  onClose: () => void
+  children: ReactNode
+  footer?: ReactNode
+}) {
+  const ref = useRef<HTMLDialogElement>(null)
+
+  useEffect(() => {
+    const dialog = ref.current
+    if (!dialog) return
+
+    if (open && !dialog.open) {
+      dialog.showModal()
+    } else if (!open && dialog.open) {
+      dialog.close()
+    }
+  }, [open])
+
+  return (
+    <dialog
+      ref={ref}
+      className="modal"
+      onCancel={(event) => {
+        event.preventDefault()
+        onClose()
+      }}
+      onClick={(event) => {
+        // A click that lands on the dialog element itself is a click on the backdrop: the content
+        // sits in children that would have been the target otherwise.
+        if (event.target === ref.current) onClose()
+      }}
+    >
+      <div className="modal-head">
+        <h2>
+          {icon}
+          {title}
+        </h2>
+        <button className="ghost" onClick={onClose} aria-label="Close">
+          <X size={15} />
+        </button>
+      </div>
+      <div className="modal-body">{children}</div>
+      {footer ? <div className="modal-foot">{footer}</div> : null}
+    </dialog>
+  )
+}
 
 export function StatTile({
   label,

@@ -70,6 +70,40 @@ export interface IndexedFileQuery {
   top?: number
 }
 
+export type SubscriptionStatus = 'Active' | 'ExpiringSoon' | 'Expired'
+
+/** A Microsoft Graph webhook subscription. The client state itself is never sent to the browser. */
+export interface SubscriptionView {
+  id: string
+  resource: string
+  notificationUrl: string
+  expirationUtc: string
+  clientStateMatches: boolean
+  resourceMatches: boolean
+  notificationUrlMatches: boolean
+  isManaged: boolean
+  /** On the configured SharePoint:NotificationUrl. The worker owns it, so it cannot be deleted here. */
+  isDefault: boolean
+  status: SubscriptionStatus
+}
+
+export interface UpdateSubscriptionResult {
+  subscription: SubscriptionView
+  /** True when the notification URL changed: Graph can only express that as a new subscription. */
+  replaced: boolean
+  warning: string | null
+}
+
+export interface SubscriptionOverview {
+  expectedResource: string
+  expectedNotificationUrl: string
+  renewalEnabled: boolean
+  lifetimeDays: number
+  renewalCheckHours: number
+  renewalThresholdDays: number
+  items: SubscriptionView[]
+}
+
 /** The three retrieval strategies the API exposes over one request body. */
 export type SearchMode = 'fulltext' | 'vector' | 'hybrid'
 

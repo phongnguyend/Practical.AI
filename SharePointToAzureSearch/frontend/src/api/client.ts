@@ -7,6 +7,9 @@ import type {
   SearchMode,
   SearchPayload,
   SearchQueryResults,
+  SubscriptionOverview,
+  SubscriptionView,
+  UpdateSubscriptionResult,
   TimedSearch,
 } from './types'
 
@@ -90,6 +93,58 @@ export function listIndexedFiles(
 
 export function listDeltaState(signal?: AbortSignal): Promise<DeltaStateRow[]> {
   return request<DeltaStateRow[]>('/api/state/delta', { signal })
+}
+
+export function listSubscriptions(signal?: AbortSignal): Promise<SubscriptionOverview> {
+  return request<SubscriptionOverview>('/api/subscriptions', { signal })
+}
+
+/**
+ * Omitting `days` uses the API's configured `SharePoint:SubscriptionLifetimeDays`, and omitting
+ * `notificationUrl` uses its configured `SharePoint:NotificationUrl`.
+ */
+export function createSubscription(
+  days?: number,
+  notificationUrl?: string,
+): Promise<SubscriptionView> {
+  return request<SubscriptionView>('/api/subscriptions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      days: days ?? null,
+      notificationUrl: notificationUrl?.trim() || null,
+    }),
+  })
+}
+
+export function renewSubscription(id: string, days?: number): Promise<SubscriptionView> {
+  return request<SubscriptionView>(`/api/subscriptions/${encodeURIComponent(id)}/renew`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ days: days ?? null }),
+  })
+}
+
+/**
+ * Changes a subscription's lifetime and, when `notificationUrl` differs, its endpoint. Graph cannot
+ * PATCH a URL, so the API replaces the subscription — the result says whether it did.
+ */
+export function updateSubscription(
+  id: string,
+  days: number,
+  notificationUrl: string,
+): Promise<UpdateSubscriptionResult> {
+  return request<UpdateSubscriptionResult>(`/api/subscriptions/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ days, notificationUrl: notificationUrl.trim() || null }),
+  })
+}
+
+export function deleteSubscription(id: string): Promise<{ deleted: string }> {
+  return request<{ deleted: string }>(`/api/subscriptions/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
 }
 
 export function search(

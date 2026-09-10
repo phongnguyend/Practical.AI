@@ -267,7 +267,17 @@ public sealed class SharePointClient(
         }
     }
 
-    public async Task<GraphSubscription> CreateSubscriptionAsync(DateTimeOffset expiration, CancellationToken cancellationToken)
+    /// <summary>
+    /// Creates a subscription over the configured drive. <paramref name="notificationUrl"/> overrides
+    /// <c>SharePoint:NotificationUrl</c> for this one subscription, which is what lets an operator point
+    /// a subscription at a tunnel or a replacement host without redeploying; omit it for the configured
+    /// value. Microsoft Graph calls the URL to validate it before the subscription is created, so it has
+    /// to be reachable from the internet at the time of the call.
+    /// </summary>
+    public async Task<GraphSubscription> CreateSubscriptionAsync(
+        DateTimeOffset expiration,
+        string? notificationUrl,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -275,7 +285,9 @@ public sealed class SharePointClient(
             var result = await graph.Subscriptions.PostAsync(new SdkSubscription
             {
                 ChangeType = "updated",
-                NotificationUrl = _options.NotificationUrl,
+                NotificationUrl = string.IsNullOrWhiteSpace(notificationUrl)
+                    ? _options.NotificationUrl
+                    : notificationUrl,
                 Resource = $"drives/{driveId}/root",
                 ExpirationDateTime = expiration,
                 ClientState = _options.ClientState,
@@ -298,6 +310,22 @@ public sealed class SharePointClient(
             {
                 ExpirationDateTime = expiration
             }, cancellationToken: cancellationToken);
+        }
+        catch (ApiException ex)
+        {
+            throw ToHttpRequestException(ex);
+        }
+    }
+
+    /// <summary>
+    /// Removes a subscription. Microsoft Graph stops delivering notifications for it immediately, so the
+    /// drive is then only reconciled by the scheduled synchronization.
+    /// </summary>
+    public async Task DeleteSubscriptionAsync(string id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await graph.Subscriptions[id].DeleteAsync(cancellationToken: cancellationToken);
         }
         catch (ApiException ex)
         {

@@ -352,6 +352,29 @@ Read-only views over the worker's SQL Server state, for the front end and for op
 
 Like the search endpoints they are unauthenticated and unfiltered, so the same warning applies: put authentication in front of them, because between them they expose every indexed file's metadata and the Graph delta tokens.
 
+## Subscription endpoints
+
+Managing the Microsoft Graph webhook subscription by hand, for when the renewal service is off or a subscription has to be replaced. They share `SubscriptionManager` with `SubscriptionRenewalBackgroundService`, so both agree on which of the tenant's subscriptions this deployment owns: the one whose resource, notification URL, and `clientState` all match the configuration.
+
+| Endpoint | Effect |
+| --- | --- |
+| `GET /api/subscriptions` | Every subscription on the application registration, plus the configuration one would be created from. Each entry reports whether its resource, notification URL, and client state match, whether it is the default (`isDefault`), and a status of `Active`, `ExpiringSoon` (inside 3 days), or `Expired` |
+| `POST /api/subscriptions` | Creates one over the configured resource. Body `{ "days": 28, "notificationUrl": "https://..." }` — both optional, falling back to `SharePoint:SubscriptionLifetimeDays` and `SharePoint:NotificationUrl`; `days` is clamped to 1-29 |
+| `PUT /api/subscriptions/{id}` | Changes a subscription's lifetime and, for a non-default one, its notification URL |
+| `POST /api/subscriptions/{id}/renew` | Extends an existing subscription, body `{ "days": 28 }` |
+| `DELETE /api/subscriptions/{id}` | Removes it. Graph stops delivering notifications immediately |
+
+Two rules are enforced across all of them:
+
+- **The default subscription cannot be deleted or moved.** The default is whichever subscription sits on the configured `SharePoint:NotificationUrl`; the renewal service owns it and would recreate it, so both operations return `400`. Change `SharePoint:NotificationUrl` to move it.
+- **Notification URLs are unique.** Creating or editing onto a URL another subscription already uses returns `409`.
+
+Microsoft Graph cannot `PATCH` a subscription's notification URL, so `PUT` applies a URL change by creating the replacement first and deleting the original only once that succeeds — a failure leaves the original in place rather than leaving the drive uncovered. The response says whether it did (`replaced`), because the subscription ID changes when it does, and carries a `warning` if the old one could not be removed afterwards.
+
+`clientState` is never returned — it is the secret the webhook authenticates notifications with, so each entry carries a `clientStateMatches` boolean instead. A rejection from Graph comes back as `502` with Graph's own message rather than an opaque `500`.
+
+**These endpoints change tenant state and are unauthenticated like the rest.** `DELETE` in particular stops change notifications, leaving the scheduled synchronization as the only trigger.
+
 ## Front end
 
 `frontend/` is a React and Vite app over these endpoints: the two state tables, and the three retrieval strategies run one at a time or all three side by side. See [frontend/README.md](frontend/README.md).
