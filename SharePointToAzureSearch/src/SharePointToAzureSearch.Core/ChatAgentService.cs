@@ -13,12 +13,18 @@ public sealed record ChatTurn(string Text, IReadOnlyList<ChatCitation> Citations
 
 /// <summary>
 /// The chat assistant. It runs on the Azure OpenAI chat deployment configured alongside the embedding
-/// model and is given one tool — a hybrid search over the same index the rest of this solution fills —
-/// so it answers from indexed SharePoint content instead of from the model's own memory.
+/// model and is given four tools of its own — a hybrid search over the same index the rest of this
+/// solution fills, a download of one of the files that search returned, a refresh that takes that file
+/// again as SharePoint holds it now, and an upload of the local copy back over the document — so it
+/// answers from indexed SharePoint content instead of from the model's own memory. The officecli MCP
+/// server's tools are added to those when it is configured, which is what lets the assistant edit a
+/// downloaded file before sending it back.
 /// </summary>
 public sealed class ChatAgentService(
     ChatClient chatClient,
     ISearchQueryStore searchStore,
+    SharePointFileCache files,
+    OfficeCliToolProvider officeCli,
     ILogger<ChatAgentService> logger)
 {
     /// <summary>
@@ -39,6 +45,44 @@ public sealed class ChatAgentService(
         returns nothing relevant, say plainly that the indexed documents do not cover it — do not fall back
         on general knowledge and present it as though it came from the library.
 
+        Use the download_file tool when the user asks for a copy of a document on the local file system, and
+        also when they ask you to edit, change, or update a document — a local copy is the first step, so
+        download the file and report where it is. It takes the fileId of a search result, so search for the
+        document first and pass the fileId from the results; then report the localPath it returns. A file
+        already downloaded is not fetched again, and the tool says so.
+
+        The refresh_file tool downloads a file again whether or not a local copy exists, replacing it with
+        the version SharePoint holds now. Use it when the user asks for the latest copy, or when the
+        document may have changed in the library since it was downloaded. It throws away local changes
+        that have not been uploaded, so if you have edited that file and not uploaded it, say what would
+        be lost and ask before refreshing.
+
+        The officecli tool runs the officecli command line over .docx, .xlsx, and .pptx files that are on
+        this machine's file system, and is how you read a document in full or change one. Pass it the
+        localPath that download_file returned; it cannot reach SharePoint itself, so a file has to be
+        downloaded before officecli can touch it. Editing the local copy changes nothing in SharePoint —
+        say that when you report what you changed, and give the user the path to the edited file.
+
+        Anything you add to or change in a document must match the style of what is already there, so that
+        the result reads as one document rather than an edit stitched into it. Before you write, read the
+        elements around the place you are writing — the neighbouring paragraphs, rows, or shapes — and look
+        at their properties, not just their text. Reuse what they use: the same named style or heading
+        level, font, size, weight, colour, alignment, spacing, list and numbering format, table and cell
+        formatting, and on a slide the layout, placeholder positions, and sizes of the shapes beside it.
+        Where an existing element already does the job, copy its formatting rather than inventing your own;
+        where the document is inconsistent, follow the convention it uses most. Match its wording too:
+        heading capitalization, tense, person, date and number formats, and terminology. Never leave
+        default-formatted content behind, and check the result — officecli can show you the document's
+        issues and render a page — before you report the edit as done.
+
+        The upload_file tool sends the local copy back and replaces the document in SharePoint with it, as
+        a new version. It is the one thing you do that other people see, so use it only when the user has
+        explicitly asked for the changes to be saved, published, or uploaded back — finishing an edit is
+        not that instruction, so end there and offer to upload. If the request is ambiguous, ask before
+        uploading rather than after. It sends whatever is on disk at that moment, so make every change
+        first and upload once. Afterwards, say that SharePoint now holds a new version and that the
+        earlier one is still in the document's version history.
+
         For anything that is not about the documents — a greeting, a question about what you can do — just
         answer normally without searching. Keep answers concise and use Markdown for structure.
         """;
@@ -49,8 +93,19 @@ public sealed class ChatAgentService(
         string? userId,
         CancellationToken cancellationToken)
     {
-        // The tool collects what it retrieved so the citations can be stored with the answer.
-        var tool = new SearchTool(searchStore, userId, logger);
+        // The tools collect what they retrieved so the citations can be stored with the answer.
+        var turnTools = new AgentTools(searchStore, files, userId, logger);
+
+        // Named explicitly so the names the instructions above use are the names the model sees. officecli's
+        // tools come from the MCP server itself and keep the names it publishes.
+        List<AITool> tools =
+        [
+            AIFunctionFactory.Create(turnTools.SearchDocumentsAsync, new AIFunctionFactoryOptions { Name = "search_documents" }),
+            AIFunctionFactory.Create(turnTools.DownloadFileAsync, new AIFunctionFactoryOptions { Name = "download_file" }),
+            AIFunctionFactory.Create(turnTools.RefreshFileAsync, new AIFunctionFactoryOptions { Name = "refresh_file" }),
+            AIFunctionFactory.Create(turnTools.UploadFileAsync, new AIFunctionFactoryOptions { Name = "upload_file" }),
+            .. await officeCli.GetToolsAsync(cancellationToken),
+        ];
 
         var agent = chatClient.AsAIAgent(new ChatClientAgentOptions
         {
@@ -58,7 +113,7 @@ public sealed class ChatAgentService(
             ChatOptions = new ChatOptions
             {
                 Instructions = Instructions,
-                Tools = [AIFunctionFactory.Create(tool.SearchDocumentsAsync)],
+                Tools = tools,
             },
         });
 
@@ -82,24 +137,45 @@ public sealed class ChatAgentService(
         }
 
         logger.LogInformation(
-            "Chat turn answered with {Searches} search call(s) and {Citations} citation(s).",
-            tool.SearchCount,
-            tool.Citations.Count);
+            "Chat turn answered with {Searches} search call(s), {Downloads} download call(s), {Refreshes} refresh call(s), {Uploads} upload call(s) and {Citations} citation(s).",
+            turnTools.SearchCount,
+            turnTools.DownloadCount,
+            turnTools.RefreshCount,
+            turnTools.UploadCount,
+            turnTools.Citations.Count);
 
-        return new ChatTurn(text, tool.Citations);
+        return new ChatTurn(text, turnTools.Citations);
     }
 
     /// <summary>
-    /// The one tool the agent gets. It is an instance rather than a static function so that the user
-    /// whose permissions apply, and the documents retrieved, belong to a single turn.
+    /// The tools the agent gets. They are instance methods rather than static functions so that the user
+    /// whose permissions apply, the documents retrieved, and the files eligible for download and upload
+    /// all belong to a single turn.
     /// </summary>
-    private sealed class SearchTool(ISearchQueryStore store, string? userId, ILogger logger)
+    private sealed class AgentTools(
+        ISearchQueryStore store,
+        SharePointFileCache files,
+        string? userId,
+        ILogger logger)
     {
         private readonly List<ChatCitation> _citations = [];
+
+        /// <summary>
+        /// The files this turn's searches returned, by ID. The download and upload tools only accept an ID
+        /// from here, so a file the permission filter kept out of the results can be neither fetched nor
+        /// replaced by asking the model for an arbitrary ID.
+        /// </summary>
+        private readonly Dictionary<string, string> _retrievedFiles = new(StringComparer.Ordinal);
 
         public IReadOnlyList<ChatCitation> Citations => _citations;
 
         public int SearchCount { get; private set; }
+
+        public int DownloadCount { get; private set; }
+
+        public int RefreshCount { get; private set; }
+
+        public int UploadCount { get; private set; }
 
         [Description("Search the indexed SharePoint documents and return the most relevant excerpts. Use this before answering anything about document content.")]
         public async Task<IReadOnlyList<SearchToolHit>> SearchDocumentsAsync(
@@ -119,7 +195,8 @@ public sealed class ChatAgentService(
             var hits = new List<SearchToolHit>(results.Items.Count);
             foreach (var item in results.Items)
             {
-                hits.Add(new SearchToolHit(item.Name, item.Path, item.ChunkNumber, item.Content));
+                hits.Add(new SearchToolHit(item.ItemId, item.Name, item.Path, item.ChunkNumber, item.Content));
+                _retrievedFiles[item.ItemId] = item.Name;
 
                 // One citation per file: several chunks of the same document are one source to a reader.
                 if (!_citations.Any(x => x.Name == item.Name && x.ChunkNumber == item.ChunkNumber))
@@ -131,8 +208,141 @@ public sealed class ChatAgentService(
             logger.LogInformation("Agent searched for {Query} and got {Count} excerpts.", query, hits.Count);
             return hits;
         }
+
+        [Description("Download one of the SharePoint files a previous search returned to the local file system and return its path. A file that has already been downloaded is reused rather than downloaded again. Use this when the user asks for a local copy of a document, or asks to edit, change, or update one — editing starts from a local copy.")]
+        public async Task<DownloadToolResult> DownloadFileAsync(
+            [Description("The fileId of a search result, exactly as search_documents returned it.")]
+            string fileId,
+            CancellationToken cancellationToken = default)
+        {
+            DownloadCount++;
+
+            if (!_retrievedFiles.TryGetValue(fileId ?? "", out var fileName))
+            {
+                logger.LogWarning("Agent asked to download the unknown file {FileId}.", fileId);
+                return DownloadToolResult.Failed(
+                    "No file with that fileId is available. Search for the document first and use the fileId from the results.");
+            }
+
+            try
+            {
+                var file = await files.DownloadAsync(fileId!, fileName, cancellationToken);
+                return new DownloadToolResult(true, file.LocalPath, file.FileName, file.SizeBytes, file.AlreadyOnDisk, null);
+            }
+            catch (FileTooLargeException ex)
+            {
+                logger.LogWarning(ex, "Agent could not download {FileName}; it is over the configured limit.", fileName);
+                return DownloadToolResult.Failed($"'{fileName}' is too large to download: {ex.Message}");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Agent could not download {FileName}.", fileName);
+                return DownloadToolResult.Failed($"'{fileName}' could not be downloaded: {ex.Message}");
+            }
+        }
+
+        [Description("Download one of the SharePoint files a previous search returned again, replacing whatever local copy exists with the version SharePoint holds now, and return its path. Use this when the document may have changed in SharePoint since it was downloaded, or when the user asks for the latest version. It discards local changes that were not uploaded.")]
+        public async Task<DownloadToolResult> RefreshFileAsync(
+            [Description("The fileId of a search result, exactly as search_documents returned it.")]
+            string fileId,
+            CancellationToken cancellationToken = default)
+        {
+            RefreshCount++;
+
+            if (!_retrievedFiles.TryGetValue(fileId ?? "", out var fileName))
+            {
+                logger.LogWarning("Agent asked to refresh the unknown file {FileId}.", fileId);
+                return DownloadToolResult.Failed(
+                    "No file with that fileId is available. Search for the document first and use the fileId from the results.");
+            }
+
+            try
+            {
+                var file = await files.RefreshAsync(fileId!, fileName, cancellationToken);
+                return new DownloadToolResult(true, file.LocalPath, file.FileName, file.SizeBytes, file.AlreadyOnDisk, null);
+            }
+            catch (FileTooLargeException ex)
+            {
+                logger.LogWarning(ex, "Agent could not refresh {FileName}; it is over the configured limit.", fileName);
+                return DownloadToolResult.Failed($"'{fileName}' is too large to download: {ex.Message}");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Agent could not refresh {FileName}.", fileName);
+                return DownloadToolResult.Failed($"'{fileName}' could not be refreshed: {ex.Message}");
+            }
+        }
+
+        [Description("Upload the local copy of a file back to SharePoint, replacing the document there with it as a new version. The file must have been downloaded with download_file first; whatever is on disk now is what gets sent. Use this only when the user has explicitly asked for the changes to be saved back to SharePoint — never on your own initiative after an edit.")]
+        public async Task<UploadToolResult> UploadFileAsync(
+            [Description("The fileId of the document to replace, the same one download_file was given.")]
+            string fileId,
+            CancellationToken cancellationToken = default)
+        {
+            UploadCount++;
+
+            if (!_retrievedFiles.TryGetValue(fileId ?? "", out var fileName))
+            {
+                logger.LogWarning("Agent asked to upload the unknown file {FileId}.", fileId);
+                return UploadToolResult.Failed(
+                    "No file with that fileId is available. Search for the document first and use the fileId from the results.");
+            }
+
+            try
+            {
+                var version = await files.UploadAsync(fileId!, fileName, cancellationToken);
+                return new UploadToolResult(
+                    true, version.Name, version.WebUrl, version.Size, version.LastModifiedUtc, null);
+            }
+            catch (FileNotFoundException ex)
+            {
+                logger.LogWarning(ex, "Agent could not upload {FileName}; it has not been downloaded.", fileName);
+                return UploadToolResult.Failed(
+                    $"'{fileName}' has no local copy to upload. Download it with download_file, change it, then upload.");
+            }
+            catch (FileTooLargeException ex)
+            {
+                logger.LogWarning(ex, "Agent could not upload {FileName}; it is over the configured limit.", fileName);
+                return UploadToolResult.Failed($"'{fileName}' is too large to upload: {ex.Message}");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Agent could not upload {FileName}.", fileName);
+                return UploadToolResult.Failed($"'{fileName}' could not be uploaded: {ex.Message}");
+            }
+        }
     }
 
-    /// <summary>What the model sees for each excerpt. Deliberately small — no vectors, no identifiers.</summary>
-    public sealed record SearchToolHit(string FileName, string? Folder, int ChunkNumber, string Excerpt);
+    /// <summary>
+    /// What the model sees for each excerpt. Deliberately small — no vectors, no chunk keys — but it does
+    /// carry the drive item ID, because that is the handle the download tool takes.
+    /// </summary>
+    public sealed record SearchToolHit(string FileId, string FileName, string? Folder, int ChunkNumber, string Excerpt);
+
+    /// <summary>
+    /// The outcome of a download. Failures come back as a result rather than an exception, so the model
+    /// can tell the user what went wrong and carry on with the turn.
+    /// </summary>
+    public sealed record DownloadToolResult(
+        bool Success,
+        string? LocalPath,
+        string? FileName,
+        long? SizeBytes,
+        bool AlreadyOnDisk,
+        string? Error)
+    {
+        public static DownloadToolResult Failed(string error) => new(false, null, null, null, false, error);
+    }
+
+    /// <summary>The outcome of an upload — the version SharePoint now holds, or why it did not happen.</summary>
+    public sealed record UploadToolResult(
+        bool Success,
+        string? FileName,
+        string? WebUrl,
+        long? SizeBytes,
+        DateTimeOffset? LastModifiedUtc,
+        string? Error)
+    {
+        public static UploadToolResult Failed(string error) => new(false, null, null, null, null, error);
+    }
 }

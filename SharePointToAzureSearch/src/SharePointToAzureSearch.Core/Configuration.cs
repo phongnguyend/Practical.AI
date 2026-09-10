@@ -133,6 +133,85 @@ public sealed class MarkItDownOptions
     public bool IsConfigured => !string.IsNullOrWhiteSpace(Endpoint);
 }
 
+/// <summary>
+/// Where the chat assistant's download tool puts the SharePoint files it fetches, and how large a file it
+/// will fetch. The directory is a cache: a file already on disk is handed back as it is rather than
+/// downloaded again.
+/// </summary>
+public sealed class DownloadOptions
+{
+    public const string SectionName = "Downloads";
+
+    /// <summary>
+    /// Root directory for downloaded files. A relative path resolves against the process working
+    /// directory. Empty — the default — puts them in <c>sharepoint-downloads</c> under the system
+    /// temporary directory.
+    /// </summary>
+    public string Directory { get; set; } = "";
+
+    [Range(1024, 209_715_200)] public int MaxFileBytes { get; set; } = 20 * 1024 * 1024;
+
+    /// <summary>The absolute root directory, whatever form <see cref="Directory"/> was configured in.</summary>
+    public string ResolvedDirectory => Path.GetFullPath(string.IsNullOrWhiteSpace(Directory)
+        ? Path.Combine(Path.GetTempPath(), "sharepoint-downloads")
+        : Directory);
+}
+
+/// <summary>
+/// The officecli MCP server the chat assistant edits Office files with. officecli is a local command line
+/// over .docx, .xlsx, and .pptx files, run as a child process speaking MCP over stdio, so it only reaches
+/// files that are already on this host — the ones the download tool put there.
+/// </summary>
+public sealed class OfficeCliOptions
+{
+    public const string SectionName = "OfficeCli";
+
+    /// <summary>
+    /// Whether the assistant gets officecli's tools at all. With this false, or with no
+    /// <see cref="Command"/>, no child process is started and the assistant can search and download but
+    /// not edit.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// The officecli executable — a name to be found on <c>PATH</c>, as the npm package's shim is, or a
+    /// full path to it.
+    /// </summary>
+    public string Command { get; set; } = "officecli";
+
+    /// <summary>
+    /// Arguments that put officecli into MCP server mode. Empty — the default — means
+    /// <see cref="DefaultArguments"/>.
+    /// <para>
+    /// It must stay empty here rather than carrying the default value: the configuration binder adds
+    /// configured entries to a collection instead of replacing it, so a property initialized to
+    /// <c>["mcp"]</c> and configured as <c>[ "mcp" ]</c> would run <c>officecli mcp mcp</c>, where the
+    /// second <c>mcp</c> is read as the name of an editor to register officecli with.
+    /// </para>
+    /// </summary>
+    public IList<string> Arguments { get; set; } = [];
+
+    /// <summary>The verb that runs officecli as an MCP server over stdio.</summary>
+    public static readonly string[] DefaultArguments = ["mcp"];
+
+    /// <summary>
+    /// The arguments to start the server with: the configured ones, or <see cref="DefaultArguments"/>
+    /// when none are configured.
+    /// </summary>
+    public string[] ResolvedArguments =>
+        Arguments.Where(x => !string.IsNullOrWhiteSpace(x)).ToArray() is { Length: > 0 } configured
+            ? configured
+            : DefaultArguments;
+
+    /// <summary>
+    /// How long the server has to start and list its tools. It is spent once, on the first turn that
+    /// needs the tools, not on every turn.
+    /// </summary>
+    [Range(1, 600)] public int StartupTimeoutSeconds { get; set; } = 60;
+
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(Command);
+}
+
 public sealed class ProcessorOptions
 {
     public const string SectionName = "Processor";

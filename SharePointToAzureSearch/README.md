@@ -20,8 +20,9 @@ Create these resources before deploying:
 3. Azure AI Search and an Azure OpenAI embedding deployment. The search index is created or updated automatically.
 4. A MarkItDown service reachable at `MarkItDown:Endpoint`, which converts DOCX, PPTX, and XLSX to markdown. Plain-text formats are read in-process and need no service.
 5. Azure AI Document Intelligence, unless the allow list stays within the formats above. Every other format — PDF and images, for example — needs Document Intelligence, or it is indexed using metadata text only.
-6. An Entra application or managed identity with Microsoft Graph application access to the target site/drive. Prefer `Sites.Selected` with an explicit grant to the site; `Sites.Read.All` is the broader alternative. Admin consent is required.
+6. An Entra application or managed identity with Microsoft Graph application access to the target site/drive. Prefer `Sites.Selected` with an explicit grant to the site; `Sites.Read.All` is the broader alternative. Admin consent is required. Read access covers everything but the chat assistant's [`upload_file`](#uploading-a-file-back) tool, which needs a `write` grant (or `Sites.ReadWrite.All`) — grant it only if the assistant should be able to replace documents.
 7. A public HTTPS URL for the API. Microsoft Graph must be able to call it during subscription creation. Not needed when `SharePoint:SubscriptionRenewalEnabled` is `false` and the worker polls on its schedule alone.
+8. `@officecli/officecli` on the API's host, only for the chat assistant's editing tools. See [Editing a file with officecli](#editing-a-file-with-officecli); set `OfficeCli:Enabled` to `false` where it is not installed.
 
 Assign Azure RBAC appropriate to each process: Service Bus Data Sender to the API; Service Bus Data Receiver, Search Index Data Contributor, Search Service Contributor, and Cognitive Services OpenAI User to the worker. Add Cognitive Services User when Document Intelligence is enabled. SQL Server permissions are granted inside the database rather than through RBAC: see [Worker state in SQL Server](#worker-state-in-sql-server).
 
@@ -166,6 +167,9 @@ AzureOpenAI__Endpoint
 AzureOpenAI__EmbeddingDeployment
 DocumentIntelligence__UsedManagedIdentity
 MarkItDown__Endpoint
+Downloads__Directory
+OfficeCli__Enabled
+OfficeCli__Command
 ```
 
 Microsoft Graph authentication uses the SharePoint `TenantId`, `ClientId`, and `ClientSecret` settings. Store `ClientSecret` in user secrets, environment variables, or a secret store rather than committing a real value to `appsettings.json`. The Entra application needs Microsoft Graph application permissions for the target SharePoint site or drive, with admin consent.
@@ -403,7 +407,7 @@ Microsoft Graph cannot `PATCH` a subscription's notification URL, so `PUT` appli
 
 ## Chat assistant
 
-An agent built with the [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/) (`Microsoft.Agents.AI.OpenAI`) answers questions about the indexed library. It runs on `AzureOpenAI:ChatDeployment` — `gpt-5-mini` by default, on the same resource and endpoint as the embedding deployment — and is given exactly one tool: a hybrid search over this solution's index. Its instructions tell it to search before answering anything about document content and to say so plainly when the index does not cover the question, rather than answering from the model's own knowledge.
+An agent built with the [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/) (`Microsoft.Agents.AI.OpenAI`) answers questions about the indexed library. It runs on `AzureOpenAI:ChatDeployment` — `gpt-5-mini` by default, on the same resource and endpoint as the embedding deployment — and is given four tools of its own: `search_documents`, a hybrid search over this solution's index, `download_file`, which copies one of the files that search returned onto the local file system, `refresh_file`, which takes that file again as SharePoint holds it now, and `upload_file`, which sends the local copy back over the document. When [officecli](#editing-a-file-with-officecli) is configured its tools are added to those, which is what lets the assistant read a whole document or edit one. Its instructions tell it to search before answering anything about document content and to say so plainly when the index does not cover the question, rather than answering from the model's own knowledge.
 
 Conversations and messages are stored in the same SQL Server database, in `ChatConversations` and `ChatMessages`, which the same migration creates as the worker's tables. Deleting a conversation cascades to its messages through the foreign key. Each turn replays the stored history — the last 40 messages — so the agent needs no state of its own between requests, and the documents the tool retrieved are saved with the answer as citations.
 
@@ -420,6 +424,53 @@ Conversations and messages are stored in the same SQL Server database, in `ChatC
 A conversation created with a `userId` passes it to every search the assistant runs in that conversation, so answers are restricted to what that user may view — the same filter the search endpoints apply. **Without one the assistant searches the whole index**, so an unauthenticated deployment lets any caller read any indexed document through it.
 
 The first question replaces the placeholder title, so conversations name themselves. The question is stored before the model runs, so a turn that fails still shows what was asked.
+
+### Downloading and refreshing a file
+
+The instructions call for `download_file` when the user asks for a local copy of a document, and also when they ask to edit, change, or update one — a local copy is where editing starts, so the agent fetches the file and reports where it went. Neither download nor refresh writes anything back; [`upload_file`](#uploading-a-file-back) is the only tool that does.
+
+`download_file` takes the `fileId` of a search result — the drive item ID, which `search_documents` returns alongside each excerpt — streams the file out of Microsoft Graph into `Downloads:Directory/<item id>/<file name>` — never through a byte array, so file size costs disk rather than memory — and returns that path to the model. **A file already on disk is not downloaded again**: the tool returns the existing path with `alreadyOnDisk` set, so repeated requests for the same document cost nothing.
+
+`refresh_file` is the same download without that check: it always fetches, and replaces whatever is at the path. The cache is keyed by item ID and notices neither a new version in SharePoint nor an edit made locally, so this is how either is resolved — take the library's current version, at the cost of local changes that were not uploaded. The instructions have the agent say what would be lost and ask first when it is the one that made those changes. The new copy is streamed to a staging name and moved into place, so the copy being replaced survives a download that fails halfway.
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `Downloads:Directory` | empty | Root directory for downloaded files. A relative path resolves against the process working directory; empty means `sharepoint-downloads` under the system temporary directory |
+| `Downloads:MaxFileBytes` | 20971520 | Largest file `download_file` and `refresh_file` will fetch, and the largest `upload_file` will send back. A larger file is refused, and the model reports that instead of a path |
+
+### Uploading a file back
+
+`upload_file` is `download_file` reversed: it takes the same `fileId`, and sends whatever is on disk at that moment back over the document in SharePoint. Microsoft Graph takes it in one request up to 4 MB and through an upload session in slices above that, so a large file is streamed rather than held in memory, and `Downloads:MaxFileBytes` caps it either way. **SharePoint keeps the previous file as a version rather than losing it**, so an unwanted upload is recoverable from the document's version history. The local copy is left in place, which means a later `download_file` for that item still reuses it — the cache does not notice new versions, including the one just uploaded, so `refresh_file` is what takes the file back off the server.
+
+The new version reaches the index the ordinary way, with no special case for it: SharePoint notifies the webhook, the next delta pass sees a `cTag` that does not match the one recorded for the file, and the worker extracts, chunks, and embeds it again.
+
+Uploading changes what other people see, so the instructions hold the agent to an explicit request — "save it back", "upload it", "publish it" — and tell it to stop after an edit and offer, rather than upload because an edit finished, and to ask when the request is ambiguous. The tool accepts only a `fileId` from one of the same turn's searches, so the model cannot name an arbitrary drive item, and only a file that has been downloaded; there is nothing else to send.
+
+Two requirements that indexing alone does not give you:
+
+- **Write access for the Entra application.** Indexing needs only read — `Sites.Selected` with a read grant, or `Sites.Read.All`. Uploading needs write: a `Sites.Selected` grant of `write`, or `Sites.ReadWrite.All`. Without it Graph rejects the upload and the model reports the rejection.
+- **A deliberate decision about who may trigger it.** The permission filter behind `search_documents` is a *read* filter: it says the user may see the document, not that they may change it. Any file a conversation can search, it can overwrite. With no `userId` on the conversation that is the whole index, and the chat endpoints are unauthenticated — so put authentication in front of them before granting the application write access.
+
+### Editing a file with officecli
+
+[officecli](https://www.npmjs.com/package/@officecli/officecli) is a command line over `.docx`, `.xlsx`, and `.pptx` files that also runs as an [MCP](https://modelcontextprotocol.io/) server. The assistant connects to it with the MCP C# SDK (`ModelContextProtocol.Core`) and adds whatever tools it publishes — one, `officecli`, which takes an officecli command line — to its own four. Since officecli only reaches files on this host, the pairing is `download_file` first, then officecli on the `localPath` it returned; the instructions say as much, and that an edit to the local copy is not a change in SharePoint until `upload_file` sends it back.
+
+They also require added or changed content to match the style of the document around it: read the neighbouring paragraphs, rows, or shapes and their properties first, reuse the style, font, spacing, list format, table formatting, and slide layout they use rather than leaving default-formatted content behind, follow the document's own wording conventions, and check the result before reporting the edit as done.
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `OfficeCli:Enabled` | `true` | Whether the assistant gets officecli's tools. With `false` it can search, download, refresh, and upload but not edit, and no child process is started |
+| `OfficeCli:Command` | `officecli` | The executable — a name on `PATH`, as the npm package's shim is, or a full path to it |
+| `OfficeCli:Arguments` | empty, meaning `mcp` | Arguments that put officecli into MCP server mode. Configuring a list *adds* to what the options object holds — the configuration binder appends to collections rather than replacing them — which is why the default is empty rather than `[ "mcp" ]`: those two together would run `officecli mcp mcp`, and officecli reads the second `mcp` as the name of an editor to register itself with |
+| `OfficeCli:StartupTimeoutSeconds` | 60 | How long the server has to start and list its tools |
+
+Install it with `npm install -g @officecli/officecli`, which puts the shim `OfficeCli:Command` defaults to on `PATH`.
+
+The server is one child process per application, started by the first turn that needs its tools and shared by every turn after — starting it per turn would add its startup to every answer — and shut down with the host. **A server that cannot be started costs one turn, not every turn**: the failure is logged, the assistant answers with its own four tools, and the next attempt is after a restart. Startup validation only requires that `OfficeCli:Command` is set when `OfficeCli:Enabled` is true; whether the command works is discovered on first use rather than at boot, so a missing officecli does not stop the API from starting.
+
+**These tools read and write this host's file system as the API process.** officecli takes a path, and nothing constrains that path to `Downloads:Directory` — the child process runs there, so a bare file name lands among the downloaded files, but an absolute path elsewhere is the model's to pass. Combined with an unauthenticated API, that is a wide capability: put authentication in front of the chat endpoints, run the API as an account with little else to reach, or set `OfficeCli:Enabled` to `false` where editing is not wanted.
+
+The tool only accepts a `fileId` that one of the same turn's searches returned, so the permission filter that trims those results also bounds what can be downloaded — the model cannot reach a file by inventing an ID. That still means **any file a conversation can search, it can also write to the host's file system**, and with no `userId` on the conversation that is the whole index. The file name is sanitized and the resolved path is checked to be inside `Downloads:Directory`, so a name coming back from SharePoint cannot write outside it. Failures — a file over the limit, a rejection from Graph, a disk error — come back to the model as a message rather than failing the turn.
 
 ## Front end
 

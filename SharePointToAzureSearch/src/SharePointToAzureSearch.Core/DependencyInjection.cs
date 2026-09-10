@@ -46,13 +46,18 @@ public static class DependencyInjection
 
     /// <summary>
     /// Adds the chat assistant: conversation storage in SQL Server, and an agent on the Azure OpenAI
-    /// chat deployment that can search the index. Requires <see cref="AddSearchQueryServices"/> for the
-    /// retrieval tool and <see cref="AddWebhookServices"/> for the permission filter behind it.
+    /// chat deployment that can search the index and download files from it. Requires
+    /// <see cref="AddSearchQueryServices"/> for the retrieval tool and <see cref="AddWebhookServices"/>
+    /// for the permission filter behind it and for the Microsoft Graph client the download tool uses.
     /// </summary>
     public static IServiceCollection AddChatServices(this IServiceCollection services, IConfiguration configuration)
     {
         AddDatabase(services, configuration);
         AddOpenAiOptions(services, configuration);
+        services.AddOptions<DownloadOptions>().Bind(configuration.GetSection(DownloadOptions.SectionName))
+            .ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<OfficeCliOptions>().Bind(configuration.GetSection(OfficeCliOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => !o.Enabled || o.IsConfigured, "OfficeCli:Command is required when OfficeCli:Enabled is true.").ValidateOnStart();
 
         // The chat deployment sits on the same Azure OpenAI resource as the embedding model, so it is
         // reached through the same endpoint and credential.
@@ -66,6 +71,11 @@ public static class DependencyInjection
         });
 
         services.AddSingleton<IChatStore, EfChatStore>();
+        services.AddSingleton<SharePointFileCache>();
+
+        // One officecli child process per application, shared by every turn and shut down with the
+        // container, so the provider is a singleton and nothing else may own its lifetime.
+        services.AddSingleton<OfficeCliToolProvider>();
         services.AddSingleton<ChatAgentService>();
         return services;
     }

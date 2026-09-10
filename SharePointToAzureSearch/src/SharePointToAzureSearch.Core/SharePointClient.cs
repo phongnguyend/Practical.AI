@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
+using Microsoft.Graph.Drives.Item.Items.Item.CreateUploadSession;
 using Microsoft.Graph.Drives.Item.Items.Item.Delta;
 using Microsoft.Graph.Models;
 using Microsoft.Kiota.Abstractions;
@@ -14,6 +15,12 @@ public sealed class SharePointClient(
     IMemoryCache memoryCache,
     IOptions<SharePointOptions> options)
 {
+    /// <summary>Largest file Microsoft Graph accepts in a single content request.</summary>
+    private const int SimpleUploadLimitBytes = 4 * 1024 * 1024;
+
+    /// <summary>How much of a larger file each upload-session slice carries; Graph requires a multiple of 320 KiB.</summary>
+    private const int UploadSliceBytes = 5 * 320 * 1024;
+
     private readonly SharePointOptions _options = options.Value;
 
     private async Task<Site> GetSiteAsync(CancellationToken cancellationToken = default)
@@ -200,6 +207,133 @@ public sealed class SharePointClient(
         }
     }
 
+    /// <summary>
+    /// Streams an item's content straight to <paramref name="destinationPath"/> and returns how many bytes
+    /// were written, so a file that is only wanted on disk never has to be held in memory the way
+    /// <see cref="DownloadContentAsync"/> holds it. The caller owns the path and its directory; an existing
+    /// file there is overwritten, and a download that fails, exceeds <paramref name="maxBytes"/>, or is
+    /// cancelled deletes what it had written rather than leaving a partial file behind.
+    /// </summary>
+    public async Task<long> DownloadToFileAsync(string itemId, string destinationPath, int maxBytes, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var driveId = await GetDriveIdAsync(cancellationToken);
+            await using var input = await graph.Drives[driveId].Items[itemId].Content
+                .GetAsync(cancellationToken: cancellationToken)
+                ?? throw new InvalidDataException("Microsoft Graph returned an empty content stream.");
+
+            var written = 0L;
+            await using (var output = new FileStream(
+                destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 81920, useAsync: true))
+            {
+                var buffer = new byte[81920];
+                int read;
+                while ((read = await input.ReadAsync(buffer, cancellationToken)) > 0)
+                {
+                    // Checked before the write, so an oversized file costs one buffer rather than the
+                    // whole download — Graph does not always report a length up front.
+                    if (written + read > maxBytes)
+                    {
+                        throw new FileTooLargeException(written + read, maxBytes);
+                    }
+
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                    written += read;
+                }
+            }
+
+            return written;
+        }
+        catch (ApiException ex)
+        {
+            TryDeleteFile(destinationPath);
+            throw ToHttpRequestException(ex);
+        }
+        catch
+        {
+            TryDeleteFile(destinationPath);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Replaces the content of an existing drive item with a local file, streamed from disk. SharePoint
+    /// keeps the file it had as a previous version, so this adds a version rather than overwriting
+    /// history, and it needs write access to the drive — the application permissions used for indexing
+    /// alone are not enough.
+    /// <para>
+    /// Files up to <see cref="SimpleUploadLimitBytes"/> go in one request; a larger one goes through an
+    /// upload session, which Microsoft Graph requires past about 4 MB and which sends the file in slices.
+    /// </para>
+    /// </summary>
+    public async Task<UploadedFileVersion> UploadFileAsync(string itemId, string sourcePath, int maxBytes, CancellationToken cancellationToken)
+    {
+        var source = new FileInfo(sourcePath);
+        if (!source.Exists)
+        {
+            throw new FileNotFoundException("There is no local file to upload.", sourcePath);
+        }
+
+        if (source.Length > maxBytes)
+        {
+            throw new FileTooLargeException(source.Length, maxBytes);
+        }
+
+        try
+        {
+            var driveId = await GetDriveIdAsync(cancellationToken);
+            await using var content = new FileStream(
+                sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 81920, useAsync: true);
+
+            DriveItem? item;
+            if (content.Length <= SimpleUploadLimitBytes)
+            {
+                item = await graph.Drives[driveId].Items[itemId].Content
+                    .PutAsync(content, cancellationToken: cancellationToken);
+            }
+            else
+            {
+                var session = await graph.Drives[driveId].Items[itemId].CreateUploadSession
+                    .PostAsync(new CreateUploadSessionPostRequestBody
+                    {
+                        Item = new DriveItemUploadableProperties
+                        {
+                            // The item already exists and its content is being replaced, so a name
+                            // collision is the expected case rather than a reason to fail.
+                            AdditionalData = new Dictionary<string, object>
+                            {
+                                ["@microsoft.graph.conflictBehavior"] = "replace"
+                            }
+                        }
+                    }, cancellationToken: cancellationToken)
+                    ?? throw new InvalidDataException("Microsoft Graph returned an empty upload session.");
+
+                var upload = new LargeFileUploadTask<DriveItem>(session, content, UploadSliceBytes, graph.RequestAdapter);
+                var result = await upload.UploadAsync(cancellationToken: cancellationToken);
+                if (!result.UploadSucceeded)
+                {
+                    throw new InvalidDataException("The upload session ended without Microsoft Graph accepting the whole file.");
+                }
+
+                item = result.ItemResponse;
+            }
+
+            return new UploadedFileVersion(
+                itemId,
+                item?.Name ?? source.Name,
+                item?.WebUrl,
+                item?.Size ?? source.Length,
+                item?.LastModifiedDateTime,
+                item?.ETag,
+                item?.CTag);
+        }
+        catch (ApiException ex)
+        {
+            throw ToHttpRequestException(ex);
+        }
+    }
+
     public async Task<PermissionSnapshot> GetPermissionsAsync(string itemId, CancellationToken cancellationToken)
     {
         try
@@ -373,6 +507,24 @@ public sealed class SharePointClient(
         }
     }
 
+    /// <summary>
+    /// Removes a partially written download. It runs while an exception is in flight, so a failure to
+    /// delete must not replace the exception that caused it.
+    /// </summary>
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
     private static HttpRequestException ToHttpRequestException(ApiException exception)
     {
         HttpStatusCode? statusCode = exception.ResponseStatusCode is >= 100 and <= 599
@@ -383,5 +535,19 @@ public sealed class SharePointClient(
 }
 
 public sealed record GraphSubscription(string Id, string Resource, string NotificationUrl, DateTimeOffset ExpirationUtc, string? ClientState);
+
+/// <summary>
+/// The drive item as SharePoint holds it after an upload. <paramref name="ETag"/> and
+/// <paramref name="CTag"/> belong to the version just created, so they differ from the ones the worker
+/// last indexed — which is what makes the next delta pass re-index the file.
+/// </summary>
+public sealed record UploadedFileVersion(
+    string ItemId,
+    string Name,
+    string? WebUrl,
+    long? Size,
+    DateTimeOffset? LastModifiedUtc,
+    string? ETag,
+    string? CTag);
 public sealed class GraphDeltaTokenExpiredException : Exception;
 public sealed class FileTooLargeException(long actual, long maximum) : Exception($"File is {actual} bytes; the configured limit is {maximum} bytes.");
