@@ -5,26 +5,28 @@ This .NET 10 solution keeps a permission-aware Azure AI Search vector index sync
 ## Components
 
 - `SharePointToAzureSearch.Api` exposes `POST /api/sharepoint/webhook`, completes Microsoft Graph's validation handshake, validates `clientState`, and publishes change signals to an Azure Service Bus topic.
-- `SharePointToAzureSearch.Background` consumes a topic subscription. It follows the Microsoft Graph drive delta feed, downloads changed files and their effective sharing permissions, extracts/chunks text, creates Azure OpenAI embeddings, and replaces the file's search documents. Deleted files have all chunks removed. Two more hosted services run alongside it: one creates the Graph subscription and renews it before expiration (`SharePoint:SubscriptionRenewalEnabled` to turn it off), and one runs the same delta synchronization every `Processor:ScheduledSyncMinutes` (5 by default, `ScheduledSyncEnabled` to turn it off) so missed notifications still get picked up. Either trigger can run without the other: disable the subscription to poll only, or disable the schedule to react only to notifications. All three triggers — notification, schedule, and startup sync — are serialized, so only one delta pass runs at a time.
-- `SharePointToAzureSearch.Core` uses the Microsoft Graph .NET SDK for subscriptions, delta tracking, downloads, and permissions, and contains the Service Bus, Blob checkpoint, extraction, embedding, and search-index implementations. Embeddings go through `Microsoft.Extensions.AI`'s `IEmbeddingGenerator<string, Embedding<float>>`, backed by `AzureOpenAIClient` from the Azure OpenAI SDK, so the embedding model can be swapped without touching the indexing or query code.
+- `SharePointToAzureSearch.Background` consumes a topic subscription. It follows the Microsoft Graph drive delta feed and, for each file the feed returns, compares it against the metadata recorded for the last indexing run in SQL Server: an unchanged file is left alone, a renamed or re-shared file has its metadata refreshed in place, and only a file whose content actually changed is downloaded, extracted, chunked, embedded, and replaced. Deleted files have all chunks removed. Two more hosted services run alongside it: one creates the Graph subscription and renews it before expiration (`SharePoint:SubscriptionRenewalEnabled` to turn it off), and one runs the same delta synchronization every `Processor:ScheduledSyncMinutes` (5 by default, `ScheduledSyncEnabled` to turn it off) so missed notifications still get picked up. Either trigger can run without the other: disable the subscription to poll only, or disable the schedule to react only to notifications. All three triggers — notification, schedule, and startup sync — are serialized, so only one delta pass runs at a time.
+- `SharePointToAzureSearch.Core` uses the Microsoft Graph .NET SDK for subscriptions, delta tracking, downloads, and permissions, and contains the Service Bus, SQL Server state, extraction, embedding, and search-index implementations. Embeddings go through `Microsoft.Extensions.AI`'s `IEmbeddingGenerator<string, Embedding<float>>`, backed by `AzureOpenAIClient` from the Azure OpenAI SDK, so the embedding model can be swapped without touching the indexing or query code.
 
-The webhook is intentionally only a signal. Microsoft Graph drive notifications do not contain a complete, durable list of item-level changes. A delta link is checkpointed in Blob Storage only after every returned page is indexed successfully, making retries idempotent and allowing expired delta tokens to trigger a full reconciliation.
+The webhook is intentionally only a signal. Microsoft Graph drive notifications do not contain a complete, durable list of item-level changes. A delta link is checkpointed in SQL Server only after every returned page is indexed successfully, making retries idempotent and allowing expired delta tokens to trigger a full reconciliation. Those reconciliations are why file metadata is tracked in the same database: the delta feed then returns every file in the library, and without a record of what was already indexed each one would be extracted and embedded again. See [Worker state in SQL Server](#worker-state-in-sql-server).
 
 ## Prerequisites
 
 Create these resources before deploying:
 
 1. An Azure Service Bus namespace with the configured topic and subscription.
-2. An Azure Storage account. The state container is created automatically.
+2. A SQL Server database reachable at `SqlServer:ConnectionString`, holding the worker's delta checkpoint and indexed-file metadata. Azure SQL Database, SQL Server, or SQL Server in a container all work; the tables are created automatically.
 3. Azure AI Search and an Azure OpenAI embedding deployment. The search index is created or updated automatically.
 4. A MarkItDown service reachable at `MarkItDown:Endpoint`, which converts DOCX, PPTX, and XLSX to markdown. Plain-text formats are read in-process and need no service.
 5. Azure AI Document Intelligence, unless the allow list stays within the formats above. Every other format — PDF and images, for example — needs Document Intelligence, or it is indexed using metadata text only.
 6. An Entra application or managed identity with Microsoft Graph application access to the target site/drive. Prefer `Sites.Selected` with an explicit grant to the site; `Sites.Read.All` is the broader alternative. Admin consent is required.
 7. A public HTTPS URL for the API. Microsoft Graph must be able to call it during subscription creation. Not needed when `SharePoint:SubscriptionRenewalEnabled` is `false` and the worker polls on its schedule alone.
 
-Assign Azure RBAC appropriate to each process: Service Bus Data Sender to the API; Service Bus Data Receiver, Storage Blob Data Contributor, Search Index Data Contributor, Search Service Contributor, and Cognitive Services OpenAI User to the worker. Add Cognitive Services User when Document Intelligence is enabled.
+Assign Azure RBAC appropriate to each process: Service Bus Data Sender to the API; Service Bus Data Receiver, Search Index Data Contributor, Search Service Contributor, and Cognitive Services OpenAI User to the worker. Add Cognitive Services User when Document Intelligence is enabled. SQL Server permissions are granted inside the database rather than through RBAC: see [Worker state in SQL Server](#worker-state-in-sql-server).
 
-Infrastructure is split into two deployments. `main.bicep` deploys the shared Azure services, Azure Container Registry, Log Analytics, and the Container Apps environment:
+Neither the SQL Server nor the MarkItDown service is deployed by the Bicep templates. Provision the database separately and pass its connection string to the worker as a secret.
+
+Infrastructure is split into two deployments. `main.bicep` deploys the shared Azure services, Azure Container Registry, Log Analytics, and the Container Apps environment. It does not deploy the SQL Server:
 
 ```powershell
 $resourceGroup = '<resource-group>'
@@ -37,7 +39,6 @@ $apiImageRepository = 'sharepoint-api'
 $workerImageRepository = 'sharepoint-worker'
 $serviceBusTopicName = 'sharepoint-changes'
 $serviceBusSubscriptionName = 'search-indexer'
-$stateContainerName = 'sharepoint-search-state'
 $searchIndexName = 'sharepoint-files'
 $vectorDimensions = 1536
 $embeddingDeploymentName = 'text-embedding-3-small'
@@ -61,7 +62,6 @@ $deployment = az deployment group create `
     deployDocumentIntelligence=$deployDocumentIntelligence `
     serviceBusTopicName=$serviceBusTopicName `
     serviceBusSubscriptionName=$serviceBusSubscriptionName `
-    stateContainerName=$stateContainerName `
     embeddingDeploymentName=$embeddingDeploymentName | ConvertFrom-Json
 
 $registry = $deployment.properties.outputs.containerRegistryName.value
@@ -123,7 +123,6 @@ az containerapp update `
   --set-env-vars `
     "ServiceBus__TopicName=$serviceBusTopicName" `
     "ServiceBus__SubscriptionName=$serviceBusSubscriptionName" `
-    "Storage__ContainerName=$stateContainerName" `
     "AzureSearch__IndexName=$searchIndexName" `
     "AzureSearch__VectorDimensions=$vectorDimensions" `
     "AzureOpenAI__EmbeddingDeployment=$embeddingDeploymentName" `
@@ -133,9 +132,9 @@ az containerapp update `
   --max-replicas $workerMaxReplicas
 ```
 
-`container-apps.bicep` configures `UsedManagedIdentity=true` and discoverable Azure service endpoints. The release pipeline supplies topic, subscription, container, index, vector-dimension, and model-deployment settings alongside the SharePoint settings and application secrets.
+`container-apps.bicep` configures `UsedManagedIdentity=true` and discoverable Azure service endpoints. The release pipeline supplies topic, subscription, index, vector-dimension, and model-deployment settings alongside the SharePoint settings, the `SqlServer__ConnectionString` secret, and the other application secrets.
 
-The API and worker receive separate system-assigned identities. Bicep grants the API Service Bus Data Sender and grants the worker Service Bus Data Receiver, Storage Blob Data Contributor, Search Index Data Contributor, Search Service Contributor, and Cognitive Services OpenAI User. A separate user-assigned identity has only `AcrPull` and is attached to both Container Apps for private image retrieval. Set `deployDocumentIntelligence=true` to include Document Intelligence and its worker role assignment.
+The API and worker receive separate system-assigned identities. Bicep grants the API Service Bus Data Sender and grants the worker Service Bus Data Receiver, Search Index Data Contributor, Search Service Contributor, and Cognitive Services OpenAI User. SQL Server access is not an RBAC grant; the worker's identity is added inside the database instead. A separate user-assigned identity has only `AcrPull` and is attached to both Container Apps for private image retrieval. Set `deployDocumentIntelligence=true` to include Document Intelligence and its worker role assignment.
 
 Local/key authentication is enabled by default so services can still use their `UsedManagedIdentity: false` fallback. Disable the corresponding `allow*LocalAuth` or `allow*ApiKeyAuth` parameters for managed-identity-only deployments. The templates output endpoints, app URLs, registry details, and identity object IDs, but deliberately do not output connection strings or keys.
 
@@ -156,9 +155,11 @@ ServiceBus__Enabled
 ServiceBus__UsedManagedIdentity
 ServiceBus__FullyQualifiedNamespace
 ServiceBus__ConnectionString
-Storage__UsedManagedIdentity
-Storage__ServiceUri
-Storage__ConnectionString
+SqlServer__ConnectionString
+SqlServer__SchemaName
+SqlServer__DeltaStateTableName
+SqlServer__FileMetadataTableName
+SqlServer__AutoCreateTables
 AzureSearch__UsedManagedIdentity
 AzureSearch__Endpoint
 AzureSearch__ApiKey
@@ -173,7 +174,7 @@ Microsoft Graph authentication uses the SharePoint `TenantId`, `ClientId`, and `
 
 `AzureOpenAI:Endpoint` takes the resource endpoint with no API path, such as `https://<resource>.openai.azure.com` or `https://<resource>.services.ai.azure.com`. The SDK appends `/openai/deployments/<deployment>/embeddings` itself, so the OpenAI-compatible base URL that the Foundry portal also offers — the same host with `/openai/v1` appended — would be doubled into a path that returns 404 on every embedding request. Startup validation rejects an endpoint that carries a path rather than letting it fail per request.
 
-Each Azure service has its own `UsedManagedIdentity` setting. Set it to `true` to use the host's system-assigned managed identity. Set it to `false` to use `ConnectionString` for Service Bus and Storage, or `ApiKey` for Azure AI Search, Azure OpenAI, and Document Intelligence. Store connection strings and keys in user secrets, environment variables, or a secret store rather than in `appsettings.json`.
+Each Azure service has its own `UsedManagedIdentity` setting. Set it to `true` to use the host's system-assigned managed identity. Set it to `false` to use `ConnectionString` for Service Bus, or `ApiKey` for Azure AI Search, Azure OpenAI, and Document Intelligence. SQL Server is the exception: it has no such flag, because the choice belongs in `SqlServer:ConnectionString` itself. Store connection strings and keys in user secrets, environment variables, or a secret store rather than in `appsettings.json`.
 
 ```powershell
 dotnet restore
@@ -220,6 +221,102 @@ Every field is retrievable, and the file-level fields are copied onto each chunk
 
 Azure AI Search rejects breaking field changes on an existing index, including a change to a vector field's dimensions. Changing `AzureSearch:VectorDimensions` — or the embedding model behind it — therefore means pointing `AzureSearch:IndexName` at a new index and re-indexing from scratch rather than editing the live one.
 
+## Worker state in SQL Server
+
+All of the worker's own state lives in one SQL Server database, configured by the `SqlServer` section. Both tables are created on first use in `SqlServer:SchemaName` (`dbo`).
+
+### Delta checkpoint
+
+`SqlServer:DeltaStateTableName` (`SharePointDeltaState`) holds one row per drive, keyed by `DriveId`:
+
+| Column | Type | Content |
+| --- | --- | --- |
+| `DriveId` | `NVARCHAR(200)` | Graph drive ID of the document library, the primary key |
+| `DeltaLink` | `NVARCHAR(MAX)` | Delta link the next pass resumes from |
+| `ScanId` | `UNIQUEIDENTIFIER` | Reconciliation round the checkpoint belongs to |
+| `SweptScanId` | `UNIQUEIDENTIFIER` | Round whose orphan sweep has already run; `NULL` until it has |
+| `UpdatedAtUtc` | `DATETIMEOFFSET(7)` | When the checkpoint was last advanced |
+
+The link is written only after every item on a delta page has been indexed, so a pass that fails is repeated from the last successful checkpoint. An expired delta token deletes the row and reconciles the whole drive.
+
+### Reconciliation rounds
+
+A pass that starts with no delta link walks the entire drive: the first pass ever, or the one that follows an expired delta token, which clears the checkpoint. Each of those opens a new round with a fresh `ScanId`, logged as `Walking the whole drive as reconciliation round <id>`. Every incremental pass that follows resumes from the stored link and keeps that round's id, so a round spans one full scan plus all the incremental passes built on top of it.
+
+The round id is stamped on each file's metadata row as the pass reaches it — whether the file was rebuilt, refreshed, or skipped as unchanged. A file skipped during an incremental pass already carries the current round, so nothing is written; during a full scan it costs one narrow `UPDATE` of `ScanId` alone. After a full scan completes, `ScanId` therefore separates the files the scan reached from rows left behind by files it never returned.
+
+### Orphan sweep
+
+Once a round has walked the whole drive, any tracked file still carrying an older `ScanId` is one the drive no longer returns — most often a deletion that happened while the worker was down, whose notification nobody was listening for. The sweep removes those files' search documents and their metadata rows, and logs each one.
+
+Deleting on the basis of "not seen this round" is only correct in a narrow window, so three conditions gate it:
+
+- **The drive was walked end to end.** The sweep runs only after a checkpoint has been written, and a checkpoint is written only after the final delta page. Mid-walk, a file the pass has not reached yet is indistinguishable from a file that is gone.
+- **The pass succeeded.** Any failure — a download, a conversion, an embedding, an index write — aborts the pass before the checkpoint, so a partial walk can never delete anything.
+- **The round has not been swept already.** `SweptScanId` records the round whose sweep has finished. The incremental passes that follow share the round id and skip the sweep, so it runs once per full scan rather than on every tick.
+
+The marker is written only after the sweep finishes, so a sweep interrupted halfway is resumed by the next pass in that round rather than being abandoned until the next full scan. Re-running it is harmless: the rows it would act on are gone.
+
+Orphans are claimed in batches of 500 so a large clean-up does not read the whole backlog at once. The sweep is driven by metadata rows, so documents indexed before this table existed have no row and are not swept; re-indexing them once puts them under its care.
+
+### Indexed file metadata
+
+The worker also records what it last indexed for every file, and uses that record to do as little work as each change requires. Extraction and embedding are the expensive part of a pass — a MarkItDown conversion plus one Azure OpenAI request per chunk — so a file that has not changed is not fetched at all.
+
+`SqlServer:FileMetadataTableName` (`SharePointIndexedFiles`) is keyed by `(DriveId, ItemId)`:
+
+| Column | Type | Content |
+| --- | --- | --- |
+| `DriveId` | `NVARCHAR(200)` | Graph drive ID of the document library, part of the primary key |
+| `ItemId` | `NVARCHAR(200)` | Graph `driveItem` ID of the file, part of the primary key |
+| `FileName` | `NVARCHAR(400)` | File name including extension |
+| `ParentPath` | `NVARCHAR(1000)` | Parent folder path of the file |
+| `WebUrl` | `NVARCHAR(2000)` | Browser URL of the file in SharePoint |
+| `MimeType` | `NVARCHAR(200)` | Content type reported by Graph |
+| `SizeBytes` | `BIGINT` | File size in bytes |
+| `LastModifiedUtc` | `DATETIMEOFFSET(7)` | Last modification timestamp from Graph |
+| `ETag` | `NVARCHAR(200)` | Graph ETag, which changes on a content **or** metadata change |
+| `CTag` | `NVARCHAR(200)` | Graph CTag, which changes only on a content change |
+| `PermissionsHash` | `CHAR(44)` | SHA-256 of the sharing snapshot stored on the chunks |
+| `IndexFingerprint` | `NVARCHAR(200)` | Chunk size/overlap, embedding deployment, and vector dimensions used |
+| `ChunkCount` | `INT` | Number of search documents the file was indexed as |
+| `ScanId` | `UNIQUEIDENTIFIER` | Reconciliation round that last saw the file |
+| `IndexedAtUtc` | `DATETIMEOFFSET(7)` | When the file was last indexed |
+
+For each file the delta feed returns, the worker compares the item against its record and takes the cheapest sufficient action:
+
+| Situation | Action |
+| --- | --- |
+| No record, or `IndexFingerprint` differs from the current settings | Download, extract, chunk, embed, replace |
+| `CTag` differs (content changed) | Download, extract, chunk, embed, replace |
+| Content unchanged, but name, path, URL, MIME type, size, modification time, `ETag`, or permissions differ | Merge the changed metadata onto the existing `ChunkCount` chunks; no download, extraction, or embedding |
+| Everything matches | Nothing but the round stamp; logged as skipped |
+
+Only permissions are read from Graph to make that decision, because a sharing change alters neither tag on the item. Every other comparison uses the delta response the worker already has.
+
+The record is written only after the search index write succeeds, so a failed pass re-indexes the file on its retry. A file removed from the index — deleted, renamed to a disallowed extension, grown past `Processor:MaxFileBytes`, or gone from SharePoint — has its row deleted with it. Should the index have lost chunks the record still claims, the metadata merge fails, and the worker logs a warning and rebuilds the file in full.
+
+`IndexFingerprint` is what makes a settings change safe: raising `Processor:ChunkSizeCharacters`, changing the overlap, or pointing at a different embedding deployment makes every existing row stale, so files are rebuilt rather than reported as unchanged.
+
+### Connecting
+
+`appsettings.json` ships pointing at SQL Server LocalDB — `Server=(localdb)\MSSQLLocalDB;Database=SharePointSearch;Integrated Security=true;TrustServerCertificate=true` — so a local run needs no SQL setup beyond creating the empty database once with `sqlcmd -S "(localdb)\MSSQLLocalDB" -Q "CREATE DATABASE [SharePointSearch];"`. The tables themselves are created on the first pass. Deployments override the setting with `SqlServer__ConnectionString`.
+
+The worker's SQL login needs `SELECT`, `INSERT`, `UPDATE`, and `DELETE` on both tables, plus `CREATE TABLE` in the schema for the first run. Set `SqlServer:AutoCreateTables` to `false` once they exist, or when they are deployed by migrations and the login has no DDL rights. Managed identity is expressed in the connection string rather than a `UsedManagedIdentity` flag, because SQL Server access is granted inside the database:
+
+```text
+Server=<server>.database.windows.net;Database=<database>;Authentication=Active Directory Default;Encrypt=True
+```
+
+```sql
+CREATE USER [<worker-container-app-name>] FROM EXTERNAL PROVIDER;
+ALTER ROLE db_datareader ADD MEMBER [<worker-container-app-name>];
+ALTER ROLE db_datawriter ADD MEMBER [<worker-container-app-name>];
+ALTER ROLE db_ddladmin ADD MEMBER [<worker-container-app-name>];
+```
+
+Connections are opened when a pass needs them rather than at startup, so an unreachable database fails that pass — retried on the next tick or left unsettled on the Service Bus — instead of stopping the worker. Emptying the tables is safe but not free: the drive is reconciled in full, and every file is re-extracted and re-embedded once, because a file with no record is treated as new.
+
 ## Search endpoints
 
 The API exposes the same request body over three retrieval strategies:
@@ -258,12 +355,14 @@ SharePoint site groups (`siteGroup:`/`siteUser:` principals) are not Entra group
 ## Operational behavior
 
 - Duplicate webhook deliveries are safe: a delta call after the checkpoint returns no changes, and item replacement is idempotent.
-- A file update rebuilds its chunks, content vectors, and permission fields.
-- A permission-only file change rebuilds the same record with the current permission snapshot.
-- A deleted file removes all documents matching its drive/item IDs.
-- Processing failures leave the Service Bus message unsettled, allowing normal retry/dead-letter behavior. The delta checkpoint is not advanced on failure.
+- A content change rebuilds the file's chunks, content vectors, and permission fields.
+- A rename, a move, or a permission-only change updates those fields on the existing chunks instead, leaving the content and vectors as they are. See [Indexed file metadata](#indexed-file-metadata) under [Worker state in SQL Server](#worker-state-in-sql-server).
+- A file the delta feed returns with nothing changed is skipped without being downloaded, and only stamped with the current reconciliation round. This is what keeps a full reconciliation — after an expired delta token, or on the startup pass of a restarted worker — from re-extracting and re-embedding the whole library.
+- A deleted file removes all documents matching its drive/item IDs, and its metadata row.
+- A deletion that Microsoft Graph never reported — because the worker was down, or the notification was lost — is cleaned up by the orphan sweep at the end of the next full scan, not by the incremental passes in between. See [Orphan sweep](#orphan-sweep).
+- Processing failures leave the Service Bus message unsettled, allowing normal retry/dead-letter behavior. The delta checkpoint is not advanced on failure, and neither is a file's metadata row.
 - Files over `Processor:MaxFileBytes` are skipped. Increase the limit only after considering Graph, memory, extraction, and embedding costs.
 - Only files whose extension is in `Processor:AllowedFileExtensions` are indexed; `appsettings.json` ships with `.docx`, `.pptx`, and `.xlsx`. Entries match case-insensitively, with or without a leading dot, and the worker refuses to start on an empty list rather than silently indexing nothing.
-- A file outside the allow list has any previously indexed chunks removed, so narrowing the list or renaming a file to a disallowed extension cleans the index on the next pass rather than leaving stale documents behind.
+- A file outside the allow list has any previously indexed chunks removed, so narrowing the list or renaming a file to a disallowed extension cleans the index on the next pass rather than leaving stale documents behind. The removal is unconditional rather than driven by the metadata table, so it also cleans up documents indexed before metadata tracking was enabled.
 - DOCX, PPTX, and XLSX are converted to markdown by the MarkItDown service at `MarkItDown:Endpoint`, which keeps headings, lists, and tables in the indexed text. There is no local fallback: a conversion that fails leaves the file unindexed and the Service Bus message unsettled, so the normal retry path applies, and the worker refuses to start without an endpoint.
 - The worker probes `MarkItDown:HealthPath` (`/health`) as it starts and every `MarkItDown:HealthCheckMinutes` afterwards, with a 10 second timeout of its own rather than the conversion timeout. Only transitions are logged, so a healthy service is reported once and an outage logs one warning until it recovers. The probe reports and nothing more — indexing is not gated on it, and `MarkItDown:HealthCheckEnabled` turns it off.

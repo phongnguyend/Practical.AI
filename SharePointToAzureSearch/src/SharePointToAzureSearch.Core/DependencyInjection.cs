@@ -5,7 +5,6 @@ using Azure.Identity;
 using Azure.Messaging.ServiceBus;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
-using Azure.Storage.Blobs;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -66,8 +65,8 @@ public static class DependencyInjection
         AddServiceBusOptions(services, configuration, required: false);
         AddSearchOptions(services, configuration);
         AddOpenAiOptions(services, configuration);
-        services.AddOptions<StorageOptions>().Bind(configuration.GetSection(StorageOptions.SectionName)).ValidateDataAnnotations()
-            .Validate(o => o.UsedManagedIdentity ? !string.IsNullOrWhiteSpace(o.ServiceUri) : !string.IsNullOrWhiteSpace(o.ConnectionString), "Storage:ServiceUri is required with managed identity; otherwise Storage:ConnectionString is required.").ValidateOnStart();
+        services.AddOptions<SqlServerOptions>().Bind(configuration.GetSection(SqlServerOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => !string.Equals(o.DeltaStateTableName, o.FileMetadataTableName, StringComparison.OrdinalIgnoreCase), "SqlServer:DeltaStateTableName and SqlServer:FileMetadataTableName must name different tables.").ValidateOnStart();
         services.AddOptions<DocumentIntelligenceOptions>().Bind(configuration.GetSection(DocumentIntelligenceOptions.SectionName))
             .Validate(o => string.IsNullOrWhiteSpace(o.Endpoint) || o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "DocumentIntelligence:ApiKey is required when an endpoint is configured and UsedManagedIdentity is false.").ValidateOnStart();
         services.AddOptions<MarkItDownOptions>().Bind(configuration.GetSection(MarkItDownOptions.SectionName)).ValidateDataAnnotations()
@@ -90,14 +89,8 @@ public static class DependencyInjection
         {
             AddServiceBusClient(services);
         }
-        services.AddSingleton(sp =>
-        {
-            var options = sp.GetRequiredService<IOptions<StorageOptions>>().Value;
-            return options.UsedManagedIdentity
-                ? new BlobContainerClient(new Uri($"{options.ServiceUri!.TrimEnd('/')}/{options.ContainerName}"), CreateManagedIdentityCredential())
-                : new BlobContainerClient(options.ConnectionString!, options.ContainerName);
-        });
-        services.AddSingleton<IDeltaStateStore, BlobDeltaStateStore>();
+        services.AddSingleton<IDeltaStateStore, SqlDeltaStateStore>();
+        services.AddSingleton<IFileMetadataStore, SqlFileMetadataStore>();
         services.AddSingleton(sp =>
         {
             var options = sp.GetRequiredService<IOptions<SearchOptions>>().Value;

@@ -65,13 +65,29 @@ public sealed class OpenAiOptions
     public string? ApiKey { get; set; }
 }
 
-public sealed class StorageOptions
+/// <summary>
+/// The SQL Server database the worker keeps its own state in: the Microsoft Graph delta checkpoint, and a
+/// record of what was last indexed for each SharePoint file. The record lets a delta pass tell an
+/// unchanged file from a changed one, so an unchanged file is not downloaded, extracted, and embedded
+/// again. Managed identity is expressed in the connection string — <c>Authentication=Active Directory
+/// Default</c> — because SQL Server access is granted inside the database rather than by Azure RBAC.
+/// </summary>
+public sealed class SqlServerOptions
 {
-    public const string SectionName = "Storage";
-    public bool UsedManagedIdentity { get; set; }
-    [Url] public string? ServiceUri { get; set; }
-    public string? ConnectionString { get; set; }
-    [Required] public string ContainerName { get; set; } = "sharepoint-search-state";
+    public const string SectionName = "SqlServer";
+
+    [Required] public string ConnectionString { get; set; } = "";
+    [Required] public string SchemaName { get; set; } = "dbo";
+    [Required] public string DeltaStateTableName { get; set; } = "SharePointDeltaState";
+    [Required] public string FileMetadataTableName { get; set; } = "SharePointIndexedFiles";
+
+    /// <summary>
+    /// Whether the worker creates its tables when they are missing. Set it to false when they are deployed
+    /// by migrations and the worker's login has no DDL rights.
+    /// </summary>
+    public bool AutoCreateTables { get; set; } = true;
+
+    [Range(1, 600)] public int CommandTimeoutSeconds { get; set; } = 30;
 }
 
 public sealed class DocumentIntelligenceOptions

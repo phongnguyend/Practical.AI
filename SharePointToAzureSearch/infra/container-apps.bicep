@@ -16,7 +16,6 @@ param deployDocumentIntelligence bool = false
 
 var uniqueSuffix = uniqueString(subscription().subscriptionId, resourceGroup().id)
 var serviceBusNamespaceName = take(toLower('${namePrefix}-sb-${uniqueSuffix}'), 50)
-var storageAccountName = 'st${uniqueString(namePrefix, subscription().subscriptionId, resourceGroup().id)}'
 var searchServiceName = take(toLower('${namePrefix}-search-${uniqueSuffix}'), 60)
 var openAiAccountName = take(toLower('${namePrefix}-openai-${uniqueSuffix}'), 64)
 var documentIntelligenceAccountName = take(toLower('${namePrefix}-docintel-${uniqueSuffix}'), 64)
@@ -30,7 +29,6 @@ var placeholderContainerImage = 'mcr.microsoft.com/k8se/quickstart:latest'
 var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
 var serviceBusDataSenderRoleId = '69a216fc-b8fb-44d8-bc22-1f3c2cd27a39'
 var serviceBusDataReceiverRoleId = '4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0'
-var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 var searchIndexDataContributorRoleId = '8ebe5a00-799e-43f5-93ac-243d3dce84a7'
 var searchServiceContributorRoleId = '7ca78c08-252a-4471-8644-bb5ff32d4ba0'
 var cognitiveServicesOpenAiUserRoleId = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
@@ -46,10 +44,6 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2025-01-01'
 
 resource serviceBusNamespace 'Microsoft.ServiceBus/namespaces@2024-01-01' existing = {
   name: serviceBusNamespaceName
-}
-
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
-  name: storageAccountName
 }
 
 resource searchService 'Microsoft.Search/searchServices@2025-05-01' existing = {
@@ -185,14 +179,6 @@ resource workerContainerApp 'Microsoft.App/containerApps@2025-01-01' = {
               value: '${serviceBusNamespace.name}.servicebus.windows.net'
             }
             {
-              name: 'Storage__UsedManagedIdentity'
-              value: 'true'
-            }
-            {
-              name: 'Storage__ServiceUri'
-              value: storageAccount.properties.primaryEndpoints.blob
-            }
-            {
               name: 'AzureSearch__UsedManagedIdentity'
               value: 'true'
             }
@@ -251,16 +237,6 @@ resource workerServiceBusReceiverRole 'Microsoft.Authorization/roleAssignments@2
     principalId: workerContainerApp.identity.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', serviceBusDataReceiverRoleId)
-  }
-}
-
-resource workerStorageRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storageAccount.id, workerContainerApp.id, storageBlobDataContributorRoleId)
-  scope: storageAccount
-  properties: {
-    principalId: workerContainerApp.identity.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
   }
 }
 

@@ -155,6 +155,7 @@ public sealed class SharePointClient(
                 item.Size,
                 item.LastModifiedDateTime,
                 item.ETag,
+                item.CTag,
                 item.File is not null,
                 item.Deleted is not null,
                 item.ParentReference?.Path)).ToArray();

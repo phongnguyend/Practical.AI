@@ -1,5 +1,4 @@
 using Azure.Messaging.ServiceBus;
-using Azure.Storage.Blobs;
 using Microsoft.Extensions.Options;
 
 namespace SharePointToAzureSearch.Core;
@@ -29,38 +28,50 @@ public sealed class ServiceBusChangeSignalPublisher(ServiceBusClient client, IOp
     public ValueTask DisposeAsync() => _sender.DisposeAsync();
 }
 
+/// <summary>
+/// Holds the Microsoft Graph delta link that each pass resumes from, and the reconciliation round it
+/// belongs to. See <see cref="SqlDeltaStateStore"/>.
+/// </summary>
 public interface IDeltaStateStore
 {
-    Task<string?> GetAsync(string driveId, CancellationToken cancellationToken);
-    Task SetAsync(string driveId, string deltaLink, CancellationToken cancellationToken);
+    Task<DeltaCheckpoint?> GetAsync(string driveId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Advances the checkpoint. <see cref="DeltaCheckpoint.SweptScanId"/> is left as it is, so a recorded
+    /// sweep survives the passes that follow it.
+    /// </summary>
+    Task SetAsync(string driveId, DeltaCheckpoint checkpoint, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Records that the orphan sweep for a round has finished, so no later pass repeats it.
+    /// </summary>
+    Task MarkSweptAsync(string driveId, Guid scanId, CancellationToken cancellationToken);
+
     Task ClearAsync(string driveId, CancellationToken cancellationToken);
 }
 
-public sealed class BlobDeltaStateStore(BlobContainerClient container) : IDeltaStateStore
+/// <summary>
+/// Records what was last indexed for each SharePoint file. The delta feed returns an item whenever
+/// anything about it changes — and returns every item after a delta token expires — so without this
+/// record every pass would download, extract, embed, and re-upload files that never changed. See
+/// <see cref="SqlFileMetadataStore"/>.
+/// </summary>
+public interface IFileMetadataStore
 {
-    public async Task<string?> GetAsync(string driveId, CancellationToken cancellationToken)
-    {
-        await container.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
-        var blob = container.GetBlobClient(BlobName(driveId));
-        if (!await blob.ExistsAsync(cancellationToken))
-        {
-            return null;
-        }
+    Task<FileIndexRecord?> GetAsync(string driveId, string itemId, CancellationToken cancellationToken);
+    Task SaveAsync(FileIndexRecord record, CancellationToken cancellationToken);
+    Task DeleteAsync(string driveId, string itemId, CancellationToken cancellationToken);
 
-        var download = await blob.DownloadContentAsync(cancellationToken);
-        return download.Value.Content.ToString();
-    }
+    /// <summary>
+    /// Records that a reconciliation round reached a file that needed no work, so the round's
+    /// <see cref="FileIndexRecord.ScanId"/> covers every file it saw and not only the ones it rewrote.
+    /// </summary>
+    Task MarkSeenAsync(string driveId, string itemId, Guid scanId, CancellationToken cancellationToken);
 
-    public async Task SetAsync(string driveId, string deltaLink, CancellationToken cancellationToken)
-    {
-        await container.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
-        await container.GetBlobClient(BlobName(driveId)).UploadAsync(BinaryData.FromString(deltaLink), overwrite: true, cancellationToken);
-    }
-
-    public async Task ClearAsync(string driveId, CancellationToken cancellationToken)
-    {
-        await container.GetBlobClient(BlobName(driveId)).DeleteIfExistsAsync(cancellationToken: cancellationToken);
-    }
-
-    private static string BlobName(string driveId) => $"delta/{Uri.EscapeDataString(driveId)}.txt";
+    /// <summary>
+    /// Returns up to <paramref name="limit"/> tracked files that a completed round did not reach. Call it
+    /// only once the round has walked the whole drive; until then, files it has simply not got to yet are
+    /// indistinguishable from files that are gone.
+    /// </summary>
+    Task<IReadOnlyList<string>> ListItemsOutsideScanAsync(string driveId, Guid scanId, int limit, CancellationToken cancellationToken);
 }

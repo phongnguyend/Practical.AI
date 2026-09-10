@@ -14,9 +14,6 @@ param tags object = {}
 @description('Allow Service Bus shared-access-key connection strings.')
 param allowServiceBusLocalAuth bool = true
 
-@description('Allow Storage account-key connection strings.')
-param allowStorageSharedKeyAccess bool = true
-
 @description('Allow Azure AI Search API-key authentication.')
 param allowSearchApiKeyAuth bool = true
 
@@ -51,9 +48,6 @@ param serviceBusTopicName string = 'sharepoint-changes'
 @description('Service Bus subscription name used by the worker.')
 param serviceBusSubscriptionName string = 'search-indexer'
 
-@description('Blob container used for Microsoft Graph delta checkpoints.')
-param stateContainerName string = 'sharepoint-search-state'
-
 @description('Azure AI Search service SKU.')
 @allowed([
   'basic'
@@ -65,7 +59,6 @@ param searchSku string = 'basic'
 
 var uniqueSuffix = uniqueString(subscription().subscriptionId, resourceGroup().id)
 var serviceBusNamespaceName = take(toLower('${namePrefix}-sb-${uniqueSuffix}'), 50)
-var storageAccountName = 'st${uniqueString(namePrefix, subscription().subscriptionId, resourceGroup().id)}'
 var searchServiceName = take(toLower('${namePrefix}-search-${uniqueSuffix}'), 60)
 var openAiAccountName = take(toLower('${namePrefix}-openai-${uniqueSuffix}'), 64)
 var documentIntelligenceAccountName = take(toLower('${namePrefix}-docintel-${uniqueSuffix}'), 64)
@@ -181,43 +174,6 @@ resource workerServiceBusAuthorizationRule 'Microsoft.ServiceBus/namespaces/auth
   }
 }
 
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
-  name: storageAccountName
-  location: location
-  tags: tags
-  kind: 'StorageV2'
-  sku: {
-    name: 'Standard_LRS'
-  }
-  properties: {
-    accessTier: 'Hot'
-    allowBlobPublicAccess: false
-    allowSharedKeyAccess: allowStorageSharedKeyAccess
-    minimumTlsVersion: 'TLS1_2'
-    publicNetworkAccess: 'Enabled'
-    supportsHttpsTrafficOnly: true
-  }
-}
-
-resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
-  parent: storageAccount
-  name: 'default'
-  properties: {
-    deleteRetentionPolicy: {
-      enabled: true
-      days: 7
-    }
-  }
-}
-
-resource stateContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
-  parent: blobService
-  name: stateContainerName
-  properties: {
-    publicAccess: 'None'
-  }
-}
-
 resource searchService 'Microsoft.Search/searchServices@2025-05-01' = {
   name: searchServiceName
   location: location
@@ -291,8 +247,6 @@ output serviceBusTopicName string = serviceBusTopic.name
 output serviceBusSubscriptionName string = serviceBusSubscription.name
 output apiServiceBusAuthorizationRuleName string = allowServiceBusLocalAuth ? apiServiceBusAuthorizationRule.name : ''
 output workerServiceBusAuthorizationRuleName string = allowServiceBusLocalAuth ? workerServiceBusAuthorizationRule.name : ''
-output storageServiceUri string = storageAccount.properties.primaryEndpoints.blob
-output storageContainerName string = stateContainer.name
 output searchEndpoint string = 'https://${searchService.name}.search.windows.net'
 output openAiEndpoint string = openAiAccount.properties.endpoint
 output embeddingDeploymentName string = embeddingDeployment.name

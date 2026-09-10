@@ -11,6 +11,13 @@ public interface ISearchIndexStore
     Task EnsureIndexAsync(CancellationToken cancellationToken);
     Task ReplaceItemAsync(string driveId, string itemId, IReadOnlyList<SearchChunkDocument> chunks, CancellationToken cancellationToken);
     Task DeleteItemAsync(string driveId, string itemId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Merges file and permission fields onto chunks that are already indexed, leaving their content and
+    /// vectors untouched. Returns false when the index does not hold every chunk, so the caller can fall
+    /// back to a full rebuild instead of leaving the file half-updated.
+    /// </summary>
+    Task<bool> TryMergeItemMetadataAsync(IReadOnlyList<SearchChunkMetadataDocument> chunks, CancellationToken cancellationToken);
 }
 
 public sealed class AzureSearchIndexStore(
@@ -64,6 +71,25 @@ public sealed class AzureSearchIndexStore(
         {
             await searchClient.MergeOrUploadDocumentsAsync(chunks, cancellationToken: cancellationToken);
         }
+    }
+
+    public async Task<bool> TryMergeItemMetadataAsync(IReadOnlyList<SearchChunkMetadataDocument> chunks, CancellationToken cancellationToken)
+    {
+        if (chunks.Count == 0)
+        {
+            return false;
+        }
+
+        var merged = true;
+
+        // Merge, not merge-or-upload: a chunk that is missing from the index must fail here rather than be
+        // created with no content or vector. Azure AI Search takes at most 1000 documents per request.
+        foreach (var batch in chunks.Chunk(1000))
+        {
+            var response = await searchClient.MergeDocumentsAsync(batch, cancellationToken: cancellationToken);
+            merged &= response.Value.Results.All(result => result.Succeeded);
+        }
+        return merged;
     }
 
     public async Task DeleteItemAsync(string driveId, string itemId, CancellationToken cancellationToken)
