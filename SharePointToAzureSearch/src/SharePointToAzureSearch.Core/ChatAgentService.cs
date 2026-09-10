@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -87,14 +88,34 @@ public sealed class ChatAgentService(
         answer normally without searching. Keep answers concise and use Markdown for structure.
         """;
 
-    public async Task<ChatTurn> RunAsync(
+    public async Task<ChatTurn> RunStreamingAsync(
         IReadOnlyList<ChatMessageRecord> history,
         string userMessage,
         string? userId,
+        Func<string, CancellationToken, ValueTask> onText,
+        Func<string, CancellationToken, ValueTask> onStatus,
         CancellationToken cancellationToken)
     {
         // The tools collect what they retrieved so the citations can be stored with the answer.
-        var turnTools = new AgentTools(searchStore, files, userId, logger);
+        string? lastStatus = null;
+        var statusGate = new object();
+        async ValueTask ReportStatusAsync(string status, CancellationToken token)
+        {
+            // Local tools and the agent stream can report the same call. Avoid showing it twice.
+            lock (statusGate)
+            {
+                if (status == lastStatus)
+                {
+                    return;
+                }
+
+                lastStatus = status;
+            }
+
+            await onStatus(status, token);
+        }
+
+        var turnTools = new AgentTools(searchStore, files, userId, logger, ReportStatusAsync);
 
         // Named explicitly so the names the instructions above use are the names the model sees. officecli's
         // tools come from the MCP server itself and keep the names it publishes.
@@ -128,12 +149,44 @@ public sealed class ChatAgentService(
         // A fresh session each turn: the conversation lives in SQL Server and is replayed above, so the
         // agent needs no memory of its own and nothing has to be kept alive between requests.
         var session = await agent.CreateSessionAsync(cancellationToken);
-        var response = await agent.RunAsync(messages, session, options: null, cancellationToken);
+        var answer = new StringBuilder();
+        await ReportStatusAsync("Thinking…", cancellationToken);
 
-        var text = response.Text;
+        await foreach (var update in agent.RunStreamingAsync(
+            messages,
+            session,
+            options: null,
+            cancellationToken))
+        {
+            foreach (var content in update.Contents)
+            {
+                if (content is FunctionCallContent functionCall)
+                {
+                    await ReportStatusAsync(StatusForTool(functionCall.Name), cancellationToken);
+                }
+                else if (content is FunctionResultContent)
+                {
+                    await ReportStatusAsync("Reviewing the tool result…", cancellationToken);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(update.Text))
+            {
+                lock (statusGate)
+                {
+                    lastStatus = null;
+                }
+
+                answer.Append(update.Text);
+                await onText(update.Text, cancellationToken);
+            }
+        }
+
+        var text = answer.ToString();
         if (string.IsNullOrWhiteSpace(text))
         {
             text = "The model returned an empty response. Try rephrasing the question.";
+            await onText(text, cancellationToken);
         }
 
         logger.LogInformation(
@@ -147,6 +200,16 @@ public sealed class ChatAgentService(
         return new ChatTurn(text, turnTools.Citations);
     }
 
+    private static string StatusForTool(string? name) => name switch
+    {
+        "search_documents" => "Searching indexed SharePoint documents…",
+        "download_file" => "Downloading the document…",
+        "refresh_file" => "Retrieving the latest document version…",
+        "upload_file" => "Uploading the updated document…",
+        "officecli" => "Working with the document…",
+        _ => "Running a document tool…",
+    };
+
     /// <summary>
     /// The tools the agent gets. They are instance methods rather than static functions so that the user
     /// whose permissions apply, the documents retrieved, and the files eligible for download and upload
@@ -156,7 +219,8 @@ public sealed class ChatAgentService(
         ISearchQueryStore store,
         SharePointFileCache files,
         string? userId,
-        ILogger logger)
+        ILogger logger,
+        Func<string, CancellationToken, ValueTask> reportStatus)
     {
         private readonly List<ChatCitation> _citations = [];
 
@@ -186,6 +250,7 @@ public sealed class ChatAgentService(
             CancellationToken cancellationToken = default)
         {
             SearchCount++;
+            await reportStatus("Searching indexed SharePoint documents…", cancellationToken);
 
             // Hybrid retrieval: keyword matching finds exact names and identifiers, the vector side finds
             // passages that mean the same thing in different words.
@@ -216,6 +281,7 @@ public sealed class ChatAgentService(
             CancellationToken cancellationToken = default)
         {
             DownloadCount++;
+            await reportStatus("Downloading the document…", cancellationToken);
 
             if (!_retrievedFiles.TryGetValue(fileId ?? "", out var fileName))
             {
@@ -248,6 +314,7 @@ public sealed class ChatAgentService(
             CancellationToken cancellationToken = default)
         {
             RefreshCount++;
+            await reportStatus("Retrieving the latest document version…", cancellationToken);
 
             if (!_retrievedFiles.TryGetValue(fileId ?? "", out var fileName))
             {
@@ -280,6 +347,7 @@ public sealed class ChatAgentService(
             CancellationToken cancellationToken = default)
         {
             UploadCount++;
+            await reportStatus("Uploading the updated document…", cancellationToken);
 
             if (!_retrievedFiles.TryGetValue(fileId ?? "", out var fileName))
             {

@@ -46,6 +46,8 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const [streamingText, setStreamingText] = useState('')
+  const [agentStatus, setAgentStatus] = useState('Thinking…')
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const threadRef = useRef<HTMLDivElement>(null)
@@ -185,6 +187,8 @@ export default function ChatPage() {
     let conversationId = activeId
     setError(null)
     setSending(true)
+    setStreamingText('')
+    setAgentStatus('Thinking…')
     setDraft('')
 
     const pending: ChatMessage = {
@@ -206,9 +210,23 @@ export default function ChatPage() {
         open(created.id)
       }
 
-      const result = await sendChatMessage(conversationId, content)
+      const result = await sendChatMessage(conversationId, content, (event) => {
+        if (event.type === 'started') {
+          setMessages((current) => [
+            ...current.filter((message) => message.id !== pending.id),
+            event.question,
+          ])
+        } else if (event.type === 'status') {
+          setAgentStatus(event.message)
+        } else if (event.type === 'delta') {
+          setStreamingText((current) => current + event.text)
+          setAgentStatus('Writing the answer…')
+        }
+      })
       setMessages((current) => [
-        ...current.filter((message) => message.id !== pending.id),
+        ...current.filter(
+          (message) => message.id !== pending.id && message.id !== result.question.id,
+        ),
         result.question,
         result.answer,
       ])
@@ -219,6 +237,8 @@ export default function ChatPage() {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setSending(false)
+      setStreamingText('')
+      setAgentStatus('Thinking…')
     }
   }
 
@@ -308,7 +328,7 @@ export default function ChatPage() {
                 />
               ))
             )}
-            {sending ? <Thinking /> : null}
+            {sending ? <StreamingAnswer text={streamingText} status={agentStatus} /> : null}
           </div>
 
           <div className="chat-composer">
@@ -502,16 +522,21 @@ function Citations({ citations }: { citations: ChatMessage['citations'] }) {
   )
 }
 
-function Thinking() {
+function StreamingAnswer({ text, status }: { text: string; status: string }) {
   return (
     <div className="chat-message assistant">
       <div className="chat-avatar">
         <Bot size={14} />
       </div>
       <div className="chat-body">
-        <div className="chat-thinking">
-          Searching the index and composing an answer
-          <span className="dots">
+        {text ? (
+          <div className="chat-text markdown">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+          </div>
+        ) : null}
+        <div className="chat-thinking" role="status" aria-live="polite">
+          {status}
+          <span className="dots" aria-hidden="true">
             <i />
             <i />
             <i />

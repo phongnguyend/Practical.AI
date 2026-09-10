@@ -1,6 +1,7 @@
 import type {
   ChatConversation,
   ChatFeedback,
+  ChatStreamEvent,
   ChatThread,
   ChatTurnResult,
   DeltaStateRow,
@@ -122,13 +123,76 @@ export function getThread(id: string, signal?: AbortSignal): Promise<ChatThread>
   return request<ChatThread>(`/api/chat/conversations/${encodeURIComponent(id)}/messages`, { signal })
 }
 
-/** Runs one turn. The assistant may call the search tool, so this can take several seconds. */
-export function sendChatMessage(id: string, content: string): Promise<ChatTurnResult> {
-  return request<ChatTurnResult>(`/api/chat/conversations/${encodeURIComponent(id)}/messages`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
-  })
+/** Runs one turn and reports text and tool progress as newline-delimited JSON arrives. */
+export async function sendChatMessage(
+  id: string,
+  content: string,
+  onEvent: (event: ChatStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<ChatTurnResult> {
+  let response: Response
+  try {
+    response = await fetch(
+      `${BASE_URL}/api/chat/conversations/${encodeURIComponent(id)}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/x-ndjson',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content }),
+        signal,
+      },
+    )
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') throw cause
+    throw new ApiError('Could not reach the API. Is SharePointToAzureSearch.Api running?', null)
+  }
+
+  if (!response.ok) throw await toError(response)
+  if (!response.body) throw new ApiError('The API returned no response stream.', response.status)
+
+  let question: ChatTurnResult['question'] | null = null
+  let answer: ChatTurnResult['answer'] | null = null
+  let title = ''
+  let buffer = ''
+  const decoder = new TextDecoder()
+
+  const acceptLine = (line: string) => {
+    if (!line.trim()) return
+    const event = JSON.parse(line) as ChatStreamEvent
+    onEvent(event)
+
+    if (event.type === 'started') {
+      question = event.question
+      title = event.title
+    } else if (event.type === 'completed') {
+      answer = event.answer
+      title = event.title
+    } else if (event.type === 'error') {
+      throw new ApiError(event.message, response.status)
+    }
+  }
+
+  const reader = response.body.getReader()
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) acceptLine(line)
+  }
+
+  buffer += decoder.decode()
+  acceptLine(buffer)
+
+  if (!question || !answer) {
+    throw new ApiError('The assistant stream ended before the turn completed.', response.status)
+  }
+
+  return { question, answer, title }
 }
 
 export function listFeedback(

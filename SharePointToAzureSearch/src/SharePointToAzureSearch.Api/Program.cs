@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using SharePointToAzureSearch.Core;
 
@@ -223,6 +224,7 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
     IChatStore store,
     ChatAgentService agent,
     ILogger<Program> logger,
+    HttpResponse response,
     CancellationToken cancellationToken) =>
 {
     if (string.IsNullOrWhiteSpace(body?.Content))
@@ -251,21 +253,53 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
         await store.RenameConversationAsync(id, renamed, cancellationToken);
     }
 
+    response.ContentType = "application/x-ndjson; charset=utf-8";
+    response.Headers.CacheControl = "no-cache, no-transform";
+    response.Headers.Append("X-Accel-Buffering", "no");
+
+    var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+    using var streamWriteLock = new SemaphoreSlim(1, 1);
+    async ValueTask WriteEventAsync(ChatStreamEvent item, CancellationToken token)
+    {
+        // Tools may run concurrently. Keep each JSON object and its newline together on the wire.
+        await streamWriteLock.WaitAsync(token);
+        try
+        {
+            await JsonSerializer.SerializeAsync(response.Body, item, jsonOptions, token);
+            await response.WriteAsync("\n", token);
+            await response.Body.FlushAsync(token);
+        }
+        finally
+        {
+            streamWriteLock.Release();
+        }
+    }
+
+    await WriteEventAsync(new ChatStreamEvent("started", Question: question, Title: renamed), cancellationToken);
+
     ChatTurn turn;
     try
     {
-        turn = await agent.RunAsync(history, content, conversation.UserId, cancellationToken);
+        turn = await agent.RunStreamingAsync(
+            history,
+            content,
+            conversation.UserId,
+            (text, token) => WriteEventAsync(new ChatStreamEvent("delta", Text: text), token),
+            (status, token) => WriteEventAsync(new ChatStreamEvent("status", Message: status), token),
+            cancellationToken);
     }
     catch (Exception ex) when (ex is not OperationCanceledException)
     {
         logger.LogError(ex, "The chat agent failed while answering in conversation {ConversationId}.", id);
-        return Results.Json(
-            new { error = $"The assistant could not answer: {ex.Message}" },
-            statusCode: StatusCodes.Status502BadGateway);
+        await WriteEventAsync(
+            new ChatStreamEvent("error", Message: $"The assistant could not answer: {ex.Message}"),
+            cancellationToken);
+        return Results.Empty;
     }
 
     var answer = await store.AppendMessageAsync(id, ChatMessageRole.Assistant, turn.Text, turn.Citations, cancellationToken);
-    return Results.Ok(new { question, answer, title = renamed });
+    await WriteEventAsync(new ChatStreamEvent("completed", Answer: answer, Title: renamed), cancellationToken);
+    return Results.Empty;
 });
 
 app.MapGet("/api/chat/feedback", async (
@@ -391,6 +425,15 @@ public sealed record CreateSubscriptionRequest(int? Days, string? NotificationUr
 public sealed record NewConversation(string? Title, string? UserId);
 
 public sealed record ChatTurnRequest(string? Content);
+
+/// <summary>One newline-delimited event sent while a chat turn is running.</summary>
+public sealed record ChatStreamEvent(
+    string Type,
+    string? Text = null,
+    string? Message = null,
+    ChatMessageRecord? Question = null,
+    ChatMessageRecord? Answer = null,
+    string? Title = null);
 
 /// <summary>A reaction to one answer. A null <see cref="Feedback"/> clears an earlier one.</summary>
 public sealed record MessageFeedback(ChatFeedback? Feedback);

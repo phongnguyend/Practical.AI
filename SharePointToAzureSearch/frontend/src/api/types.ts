@@ -134,6 +134,14 @@ export interface ChatTurnResult {
   title: string
 }
 
+/** Newline-delimited events emitted while an agent turn is running. */
+export type ChatStreamEvent =
+  | { type: 'started'; question: ChatMessage; title: string }
+  | { type: 'status'; message: string }
+  | { type: 'delta'; text: string }
+  | { type: 'completed'; answer: ChatMessage; title: string }
+  | { type: 'error'; message: string }
+
 export type SubscriptionStatus = 'Active' | 'ExpiringSoon' | 'Expired'
 
 /** A Microsoft Graph webhook subscription. The client state itself is never sent to the browser. */
