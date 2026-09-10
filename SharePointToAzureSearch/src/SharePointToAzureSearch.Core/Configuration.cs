@@ -84,20 +84,13 @@ public sealed class SqlServerOptions
     public const string SectionName = "SqlServer";
 
     [Required] public string ConnectionString { get; set; } = "";
-    [Required] public string SchemaName { get; set; } = "dbo";
-    [Required] public string DeltaStateTableName { get; set; } = "SharePointDeltaState";
-    [Required] public string FileMetadataTableName { get; set; } = "SharePointIndexedFiles";
-
-    /// <summary>Conversations and their messages, for the chat assistant.</summary>
-    [Required] public string ChatConversationTableName { get; set; } = "ChatConversations";
-
-    [Required] public string ChatMessageTableName { get; set; } = "ChatMessages";
 
     /// <summary>
-    /// Whether the worker creates its tables when they are missing. Set it to false when they are deployed
-    /// by migrations and the worker's login has no DDL rights.
+    /// Whether an application applies pending Entity Framework Core migrations as it starts. Set it to
+    /// false when the schema is deployed by the pipeline and the application's login has no DDL rights.
+    /// The schema itself is defined by <c>SharePointIndexDbContext</c>, not by configuration.
     /// </summary>
-    public bool AutoCreateTables { get; set; } = true;
+    public bool AutoMigrate { get; set; } = true;
 
     [Range(1, 600)] public int CommandTimeoutSeconds { get; set; } = 30;
 }

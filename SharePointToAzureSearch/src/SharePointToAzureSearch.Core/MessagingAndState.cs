@@ -30,7 +30,7 @@ public sealed class ServiceBusChangeSignalPublisher(ServiceBusClient client, IOp
 
 /// <summary>
 /// Holds the Microsoft Graph delta link that each pass resumes from, and the reconciliation round it
-/// belongs to. See <see cref="SqlDeltaStateStore"/>.
+/// belongs to. See <see cref="EfDeltaStateStore"/>.
 /// </summary>
 public interface IDeltaStateStore
 {
@@ -54,7 +54,7 @@ public interface IDeltaStateStore
 /// Records what was last indexed for each SharePoint file. The delta feed returns an item whenever
 /// anything about it changes — and returns every item after a delta token expires — so without this
 /// record every pass would download, extract, embed, and re-upload files that never changed. See
-/// <see cref="SqlFileMetadataStore"/>.
+/// <see cref="EfFileMetadataStore"/>.
 /// </summary>
 public interface IFileMetadataStore
 {

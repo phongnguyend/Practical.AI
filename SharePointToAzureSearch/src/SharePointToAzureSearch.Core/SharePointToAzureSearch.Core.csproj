@@ -12,7 +12,16 @@
     <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.20.2" />
     <PackageReference Include="Azure.Search.Documents" Version="12.0.0" />
     <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.20.0" />
+    <!--
+      Above the 6.1.x that Entity Framework Core 10 brings in on its own: that one resolves an Azure.Core
+      whose credential types collide with Azure.Identity's, which the Azure clients here need.
+    -->
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.12" />
     <PackageReference Include="Microsoft.Graph" Version="6.5.0" />
   </ItemGroup>
 

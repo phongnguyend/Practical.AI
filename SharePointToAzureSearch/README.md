@@ -16,7 +16,7 @@ The webhook is intentionally only a signal. Microsoft Graph drive notifications 
 Create these resources before deploying:
 
 1. An Azure Service Bus namespace with the configured topic and subscription.
-2. A SQL Server database reachable at `SqlServer:ConnectionString`, holding the worker's delta checkpoint and indexed-file metadata. Azure SQL Database, SQL Server, or SQL Server in a container all work; the tables are created automatically.
+2. A SQL Server database reachable at `SqlServer:ConnectionString`, holding the worker's delta checkpoint and indexed-file metadata. Azure SQL Database, SQL Server, or SQL Server in a container all work; the schema is applied by an Entity Framework Core migration as the application starts.
 3. Azure AI Search and an Azure OpenAI embedding deployment. The search index is created or updated automatically.
 4. A MarkItDown service reachable at `MarkItDown:Endpoint`, which converts DOCX, PPTX, and XLSX to markdown. Plain-text formats are read in-process and need no service.
 5. Azure AI Document Intelligence, unless the allow list stays within the formats above. Every other format — PDF and images, for example — needs Document Intelligence, or it is indexed using metadata text only.
@@ -157,10 +157,7 @@ ServiceBus__UsedManagedIdentity
 ServiceBus__FullyQualifiedNamespace
 ServiceBus__ConnectionString
 SqlServer__ConnectionString
-SqlServer__SchemaName
-SqlServer__DeltaStateTableName
-SqlServer__FileMetadataTableName
-SqlServer__AutoCreateTables
+SqlServer__AutoMigrate
 AzureSearch__UsedManagedIdentity
 AzureSearch__Endpoint
 AzureSearch__ApiKey
@@ -224,11 +221,11 @@ Azure AI Search rejects breaking field changes on an existing index, including a
 
 ## Worker state in SQL Server
 
-All of the worker's own state lives in one SQL Server database, configured by the `SqlServer` section. Both tables are created on first use in `SqlServer:SchemaName` (`dbo`).
+All of the worker's own state lives in one SQL Server database, configured by the `SqlServer` section, and is reached through Entity Framework Core. `SharePointIndexDbContext` in `SharePointToAzureSearch.Core/Data` defines every table — the two below plus the chat assistant's — and the migrations in `SharePointToAzureSearch.Core/Migrations` are generated from it, so the model is the source of truth for the schema and table names are fixed rather than configured. See [Schema and migrations](#schema-and-migrations).
 
 ### Delta checkpoint
 
-`SqlServer:DeltaStateTableName` (`SharePointDeltaState`) holds one row per drive, keyed by `DriveId`:
+`SharePointDeltaState` holds one row per drive, keyed by `DriveId`:
 
 | Column | Type | Content |
 | --- | --- | --- |
@@ -264,7 +261,7 @@ Orphans are claimed in batches of 500 so a large clean-up does not read the whol
 
 The worker also records what it last indexed for every file, and uses that record to do as little work as each change requires. Extraction and embedding are the expensive part of a pass — a MarkItDown conversion plus one Azure OpenAI request per chunk — so a file that has not changed is not fetched at all.
 
-`SqlServer:FileMetadataTableName` (`SharePointIndexedFiles`) is keyed by `(DriveId, ItemId)`:
+`SharePointIndexedFiles` is keyed by `(DriveId, ItemId)`:
 
 | Column | Type | Content |
 | --- | --- | --- |
@@ -299,11 +296,40 @@ The record is written only after the search index write succeeds, so a failed pa
 
 `IndexFingerprint` is what makes a settings change safe: raising `Processor:ChunkSizeCharacters`, changing the overlap, or pointing at a different embedding deployment makes every existing row stale, so files are rebuilt rather than reported as unchanged.
 
+### Schema and migrations
+
+The schema is defined by `SharePointIndexDbContext` and applied by Entity Framework Core migrations. When `SqlServer:AutoMigrate` is true — the default — each application applies any pending migration as it starts, so a fresh deployment needs no separate schema step. The API and the worker both do this and may start together; applying a migration takes a SQL Server application lock, so whichever gets there second waits and then finds nothing to do.
+
+Turn `AutoMigrate` off where the login has no DDL rights, and apply the schema from the pipeline instead:
+
+```bash
+dotnet ef migrations script --idempotent   --project src/SharePointToAzureSearch.Core --output schema.sql
+```
+
+Changing a table, a column, or an index means changing the model and generating a migration for it, rather than editing the database by hand:
+
+```bash
+cd src/SharePointToAzureSearch.Core
+dotnet ef migrations add <Name>
+dotnet ef database update      # or let AutoMigrate apply it on the next start
+```
+
+`dotnet ef` builds the context through `DesignTimeDbContextFactory`, so no application host has to start. Commands that reach the database — `database update`, `migrations script` without `--idempotent` — use `SqlServer__ConnectionString` from the environment, falling back to the LocalDB default.
+
+#### An existing database created before migrations
+
+Databases whose tables were created by the earlier auto-create code have no `__EFMigrationsHistory`, so the first migration would try to create tables that are already there. Both tables the worker keeps are a cache — emptying them costs one full re-extraction, nothing more — so unless there is chat history worth keeping, the simplest course is to drop the four tables and let the migration recreate them. To keep the data instead, baseline the database: add the foreign key and indexes the migration introduces, then record it as applied.
+
+```sql
+INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+VALUES (N'20260910133933_InitialCreate', N'10.0.12');
+```
+
 ### Connecting
 
-`appsettings.json` ships pointing at SQL Server LocalDB — `Server=(localdb)\MSSQLLocalDB;Database=SharePointSearch;Integrated Security=true;TrustServerCertificate=true` — so a local run needs no SQL setup beyond creating the empty database once with `sqlcmd -S "(localdb)\MSSQLLocalDB" -Q "CREATE DATABASE [SharePointSearch];"`. The tables themselves are created on the first pass. Deployments override the setting with `SqlServer__ConnectionString`.
+`appsettings.json` ships pointing at SQL Server LocalDB — `Server=(localdb)\MSSQLLocalDB;Database=SharePointSearch;Integrated Security=true;TrustServerCertificate=true` — so a local run needs no SQL setup beyond creating the empty database once with `sqlcmd -S "(localdb)\MSSQLLocalDB" -Q "CREATE DATABASE [SharePointSearch];"`. The tables themselves are created by the migration on first start. Deployments override the setting with `SqlServer__ConnectionString`.
 
-The worker's SQL login needs `SELECT`, `INSERT`, `UPDATE`, and `DELETE` on both tables, plus `CREATE TABLE` in the schema for the first run. Set `SqlServer:AutoCreateTables` to `false` once they exist, or when they are deployed by migrations and the login has no DDL rights. Managed identity is expressed in the connection string rather than a `UsedManagedIdentity` flag, because SQL Server access is granted inside the database:
+The worker's SQL login needs `SELECT`, `INSERT`, `UPDATE`, and `DELETE` on its tables, plus DDL rights while `SqlServer:AutoMigrate` is on. Managed identity is expressed in the connection string rather than a `UsedManagedIdentity` flag, because SQL Server access is granted inside the database:
 
 ```text
 Server=<server>.database.windows.net;Database=<database>;Authentication=Active Directory Default;Encrypt=True
@@ -316,7 +342,7 @@ ALTER ROLE db_datawriter ADD MEMBER [<worker-container-app-name>];
 ALTER ROLE db_ddladmin ADD MEMBER [<worker-container-app-name>];
 ```
 
-Connections are opened when a pass needs them rather than at startup, so an unreachable database fails that pass — retried on the next tick or left unsettled on the Service Bus — instead of stopping the worker. Emptying the tables is safe but not free: the drive is reconciled in full, and every file is re-extracted and re-embedded once, because a file with no record is treated as new.
+Past the migration at startup, connections are opened when a pass needs them rather than held open, so a database that goes away fails that pass — retried on the next tick or left unsettled on the Service Bus — instead of stopping the worker. A database unreachable at startup fails startup while `SqlServer:AutoMigrate` is on, because the schema check cannot run. Emptying the tables is safe but not free: the drive is reconciled in full, and every file is re-extracted and re-embedded once, because a file with no record is treated as new.
 
 ## Search endpoints
 
@@ -341,7 +367,7 @@ The response carries `totalCount` and the matching chunks with their relevance `
 
 ## State endpoints
 
-Read-only views over the worker's SQL Server state, for the front end and for operators. They read the database at `SqlServer:ConnectionString` and never write to it; a table that does not exist yet reads as empty, so they work before the worker's first pass.
+Read-only views over the worker's SQL Server state, for the front end and for operators. They read the database at `SqlServer:ConnectionString` and never write to it, and an empty table reads as an empty result, so they work before the worker's first pass.
 
 | Endpoint | Returns |
 | --- | --- |
@@ -379,7 +405,7 @@ Microsoft Graph cannot `PATCH` a subscription's notification URL, so `PUT` appli
 
 An agent built with the [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/) (`Microsoft.Agents.AI.OpenAI`) answers questions about the indexed library. It runs on `AzureOpenAI:ChatDeployment` — `gpt-5-mini` by default, on the same resource and endpoint as the embedding deployment — and is given exactly one tool: a hybrid search over this solution's index. Its instructions tell it to search before answering anything about document content and to say so plainly when the index does not cover the question, rather than answering from the model's own knowledge.
 
-Conversations and messages are stored in the same SQL Server database, in `SqlServer:ChatConversationTableName` and `SqlServer:ChatMessageTableName` (`ChatConversations` and `ChatMessages`), created on first use like the worker's tables. Each turn replays the stored history — the last 40 messages — so the agent needs no state of its own between requests, and the documents the tool retrieved are saved with the answer as citations.
+Conversations and messages are stored in the same SQL Server database, in `ChatConversations` and `ChatMessages`, which the same migration creates as the worker's tables. Deleting a conversation cascades to its messages through the foreign key. Each turn replays the stored history — the last 40 messages — so the agent needs no state of its own between requests, and the documents the tool retrieved are saved with the answer as citations.
 
 | Endpoint | Effect |
 | --- | --- |
