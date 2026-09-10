@@ -847,6 +847,460 @@ button.ghost:hover:not(:disabled) {
   }
 }
 
+/* ---------- chat ---------- */
+
+/* The page fills the viewport so the thread scrolls inside itself and the composer stays put. */
+.chat-shell {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 16px;
+  height: calc(100vh - 235px);
+  min-height: 460px;
+}
+
+.chat-sidebar,
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-conversations {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.chat-conversation {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 4px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-conversation:hover {
+  background: var(--surface-2);
+}
+
+.chat-conversation.active {
+  background: var(--accent-soft);
+}
+
+.chat-conversation-open {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+}
+
+.chat-conversation-open:hover:not(:disabled) {
+  background: transparent;
+}
+
+.chat-conversation-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.chat-conversation-meta {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+/* The delete affordance stays out of the way until the row is hovered or focused within. */
+.chat-conversation-delete {
+  opacity: 0;
+}
+
+.chat-conversation:hover .chat-conversation-delete,
+.chat-conversation:focus-within .chat-conversation-delete {
+  opacity: 1;
+}
+
+.chat-thread {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.chat-message {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+/* Marks the message a link jumped to, long enough to find it and no longer. */
+.chat-message.highlighted {
+  border-radius: var(--radius);
+  animation: jump-highlight 2600ms ease-out forwards;
+}
+
+@keyframes jump-highlight {
+  0%,
+  40% {
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-message.highlighted {
+    animation: none;
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+}
+
+.chat-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
+.chat-message.assistant /* Marks the message a link jumped to, long enough to find it and no longer. */
+.chat-message.highlighted {
+  border-radius: var(--radius);
+  animation: jump-highlight 2600ms ease-out forwards;
+}
+
+@keyframes jump-highlight {
+  0%,
+  40% {
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-message.highlighted {
+    animation: none;
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+}
+
+.chat-avatar {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.chat-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The reader's own turns sit on the right, the assistant's on the left, so a glance down the thread
+   tells you who said what before you read a word of it. */
+.chat-message.user {
+  flex-direction: row-reverse;
+}
+
+.chat-message.user .chat-body {
+  text-align: right;
+}
+
+.chat-message.user .chat-text {
+  white-space: pre-wrap;
+  text-align: left;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: var(--radius);
+  padding: 9px 12px;
+  display: inline-block;
+  max-width: 78%;
+}
+
+/* The timestamp and, for an answer, its actions share one line under the message. */
+.chat-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  min-height: 22px;
+}
+
+.chat-message.user .chat-meta {
+  justify-content: flex-end;
+}
+
+.chat-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Actions stay quiet until the message is hovered, so a long thread is not a wall of buttons. */
+.chat-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.chat-message:hover .chat-actions,
+.chat-message:focus-within .chat-actions,
+.chat-actions:has(.liked, .disliked) {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-actions {
+    transition: none;
+  }
+}
+
+.chat-actions .liked {
+  color: var(--good);
+}
+
+.chat-actions .disliked {
+  color: var(--critical);
+}
+
+/* Markdown from the model: the same rhythm as the rest of the page, nothing oversized. */
+.markdown > *:first-child {
+  margin-top: 0;
+}
+
+.markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  font-size: 14px;
+  margin: 14px 0 6px;
+}
+
+.markdown p {
+  margin: 0 0 9px;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 0 0 9px;
+  padding-left: 20px;
+}
+
+.markdown li {
+  margin-bottom: 3px;
+}
+
+.markdown code {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.markdown pre {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+
+.markdown pre code {
+  border: none;
+  padding: 0;
+  background: none;
+}
+
+.markdown table {
+  margin-bottom: 9px;
+}
+
+.markdown blockquote {
+  margin: 0 0 9px;
+  padding-left: 12px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.chat-citations {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.chat-citations summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.chat-citations ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-citations li {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.chat-citation-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.chat-citation-meta {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding-top: 3px;
+}
+
+.dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+.dots i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.dots i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dots i {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+.chat-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.chat-composer textarea {
+  flex: 1;
+  min-height: 46px;
+  max-height: 180px;
+}
+
+@media (max-width: 900px) {
+  .chat-shell {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .chat-conversations {
+    max-height: 240px;
+  }
+
+  .chat-thread {
+    min-height: 380px;
+  }
+}
+
+/* The question that prompted a rated answer, quoted above it. */
+.feedback-question {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.feedback-question > .lucide {
+  margin-top: 3px;
+}
+
+/* Collapsed by default: a long answer would bury the next entry. */
+.feedback-answer {
+  cursor: pointer;
+  max-height: 170px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 120px, transparent);
+  mask-image: linear-gradient(to bottom, #000 120px, transparent);
+}
+
 /* ---------- modal ---------- */
 
 .modal {

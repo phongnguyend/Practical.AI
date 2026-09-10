@@ -62,6 +62,13 @@ public sealed class OpenAiOptions
     public bool UsedManagedIdentity { get; set; }
     [Required, Url] public string Endpoint { get; set; } = "";
     [Required] public string EmbeddingDeployment { get; set; } = "text-embedding-3-small";
+
+    /// <summary>
+    /// The chat deployment the assistant runs on, on the same resource as
+    /// <see cref="EmbeddingDeployment"/>.
+    /// </summary>
+    [Required] public string ChatDeployment { get; set; } = "gpt-5-mini";
+
     public string? ApiKey { get; set; }
 }
 
@@ -80,6 +87,11 @@ public sealed class SqlServerOptions
     [Required] public string SchemaName { get; set; } = "dbo";
     [Required] public string DeltaStateTableName { get; set; } = "SharePointDeltaState";
     [Required] public string FileMetadataTableName { get; set; } = "SharePointIndexedFiles";
+
+    /// <summary>Conversations and their messages, for the chat assistant.</summary>
+    [Required] public string ChatConversationTableName { get; set; } = "ChatConversations";
+
+    [Required] public string ChatMessageTableName { get; set; } = "ChatMessages";
 
     /// <summary>
     /// Whether the worker creates its tables when they are missing. Set it to false when they are deployed

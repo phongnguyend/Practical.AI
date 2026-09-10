@@ -43,6 +43,32 @@ public static class DependencyInjection
     }
 
     /// <summary>
+    /// Adds the chat assistant: conversation storage in SQL Server, and an agent on the Azure OpenAI
+    /// chat deployment that can search the index. Requires <see cref="AddSearchQueryServices"/> for the
+    /// retrieval tool and <see cref="AddWebhookServices"/> for the permission filter behind it.
+    /// </summary>
+    public static IServiceCollection AddChatServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        AddSqlServerOptions(services, configuration);
+        AddOpenAiOptions(services, configuration);
+
+        // The chat deployment sits on the same Azure OpenAI resource as the embedding model, so it is
+        // reached through the same endpoint and credential.
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<OpenAiOptions>>().Value;
+            var client = options.UsedManagedIdentity
+                ? new AzureOpenAIClient(new Uri(options.Endpoint), CreateManagedIdentityCredential())
+                : new AzureOpenAIClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey!));
+            return client.GetChatClient(options.ChatDeployment);
+        });
+
+        services.AddSingleton<IChatStore, SqlChatStore>();
+        services.AddSingleton<ChatAgentService>();
+        return services;
+    }
+
+    /// <summary>
     /// Adds read-only access to the worker's SQL Server state — the delta checkpoints and the indexed-file
     /// records — for operator-facing views. Nothing registered here writes to those tables.
     /// </summary>

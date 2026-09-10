@@ -70,6 +70,70 @@ export interface IndexedFileQuery {
   top?: number
 }
 
+export interface ChatConversation {
+  id: string
+  title: string
+  /** When set, every search the assistant runs in this conversation is filtered to that user. */
+  userId: string | null
+  createdAtUtc: string
+  updatedAtUtc: string
+  messageCount: number
+}
+
+/** A document excerpt the assistant retrieved to answer with. */
+export interface ChatCitation {
+  name: string
+  path: string | null
+  webUrl: string | null
+  chunkNumber: number
+  score: number | null
+}
+
+export type ChatFeedback = 'Like' | 'Dislike'
+
+export interface ChatMessage {
+  id: string
+  conversationId: string
+  role: 'User' | 'Assistant'
+  content: string
+  citations: ChatCitation[]
+  /** What the reader thought of the answer, null until they say. */
+  feedback: ChatFeedback | null
+  createdAtUtc: string
+}
+
+/** One rated answer, with the question that prompted it. */
+export interface FeedbackEntry {
+  messageId: string
+  conversationId: string
+  conversationTitle: string
+  feedback: ChatFeedback
+  question: string | null
+  answer: string
+  citations: ChatCitation[]
+  createdAtUtc: string
+}
+
+export interface FeedbackPage {
+  totalCount: number
+  /** Counts for the search term, not the page or the selected rating. */
+  liked: number
+  disliked: number
+  items: FeedbackEntry[]
+}
+
+export interface ChatThread {
+  conversation: ChatConversation
+  messages: ChatMessage[]
+}
+
+export interface ChatTurnResult {
+  question: ChatMessage
+  answer: ChatMessage
+  /** The conversation title, which the first question replaces "New chat" with. */
+  title: string
+}
+
 export type SubscriptionStatus = 'Active' | 'ExpiringSoon' | 'Expired'
 
 /** A Microsoft Graph webhook subscription. The client state itself is never sent to the browser. */

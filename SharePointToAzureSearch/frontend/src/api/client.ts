@@ -1,5 +1,10 @@
 import type {
+  ChatConversation,
+  ChatFeedback,
+  ChatThread,
+  ChatTurnResult,
   DeltaStateRow,
+  FeedbackPage,
   IndexStateSummary,
   IndexedFileQuery,
   IndexedFileRow,
@@ -93,6 +98,56 @@ export function listIndexedFiles(
 
 export function listDeltaState(signal?: AbortSignal): Promise<DeltaStateRow[]> {
   return request<DeltaStateRow[]>('/api/state/delta', { signal })
+}
+
+export function listConversations(signal?: AbortSignal): Promise<ChatConversation[]> {
+  return request<ChatConversation[]>('/api/chat/conversations', { signal })
+}
+
+export function createConversation(userId?: string): Promise<ChatConversation> {
+  return request<ChatConversation>('/api/chat/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: null, userId: userId?.trim() || null }),
+  })
+}
+
+export function deleteConversation(id: string): Promise<{ deleted: string }> {
+  return request<{ deleted: string }>(`/api/chat/conversations/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+}
+
+export function getThread(id: string, signal?: AbortSignal): Promise<ChatThread> {
+  return request<ChatThread>(`/api/chat/conversations/${encodeURIComponent(id)}/messages`, { signal })
+}
+
+/** Runs one turn. The assistant may call the search tool, so this can take several seconds. */
+export function sendChatMessage(id: string, content: string): Promise<ChatTurnResult> {
+  return request<ChatTurnResult>(`/api/chat/conversations/${encodeURIComponent(id)}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  })
+}
+
+export function listFeedback(
+  options: { feedback?: ChatFeedback; search?: string; skip?: number; top?: number },
+  signal?: AbortSignal,
+): Promise<FeedbackPage> {
+  return request<FeedbackPage>(`/api/chat/feedback${query({ ...options })}`, { signal })
+}
+
+/** Records a reaction to one answer, or clears it with null. */
+export function setMessageFeedback(
+  messageId: string,
+  feedback: ChatFeedback | null,
+): Promise<{ id: string; feedback: ChatFeedback | null }> {
+  return request(`/api/chat/messages/${encodeURIComponent(messageId)}/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ feedback }),
+  })
 }
 
 export function listSubscriptions(signal?: AbortSignal): Promise<SubscriptionOverview> {

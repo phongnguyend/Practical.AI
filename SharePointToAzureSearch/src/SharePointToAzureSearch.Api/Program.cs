@@ -11,6 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddWebhookServices(builder.Configuration);
 builder.Services.AddSearchQueryServices(builder.Configuration);
 builder.Services.AddIndexStateServices(builder.Configuration);
+builder.Services.AddChatServices(builder.Configuration);
 
 // The viewer front end is served from its own origin during development. Origins are configured rather
 // than wildcarded, because these endpoints are unauthenticated and expose the whole index.
@@ -177,6 +178,121 @@ app.MapDelete("/api/subscriptions/{id}", (
         return new { deleted = id };
     }));
 
+// The chat assistant. Conversations live in SQL Server; each turn replays the stored history to an
+// agent that can search the index, and both the question and the answer are appended.
+app.MapGet("/api/chat/conversations", (
+    IChatStore store,
+    CancellationToken cancellationToken) => store.ListConversationsAsync(cancellationToken));
+
+app.MapPost("/api/chat/conversations", async (
+    NewConversation? body,
+    IChatStore store,
+    CancellationToken cancellationToken) =>
+{
+    var title = string.IsNullOrWhiteSpace(body?.Title) ? "New chat" : body!.Title!.Trim();
+    var userId = string.IsNullOrWhiteSpace(body?.UserId) ? null : body!.UserId!.Trim();
+    return Results.Ok(await store.CreateConversationAsync(title, userId, cancellationToken));
+});
+
+app.MapDelete("/api/chat/conversations/{id:guid}", async (
+    Guid id,
+    IChatStore store,
+    CancellationToken cancellationToken) =>
+    await store.DeleteConversationAsync(id, cancellationToken)
+        ? Results.Ok(new { deleted = id })
+        : Results.NotFound());
+
+app.MapGet("/api/chat/conversations/{id:guid}/messages", async (
+    Guid id,
+    IChatStore store,
+    CancellationToken cancellationToken) =>
+{
+    var conversation = await store.GetConversationAsync(id, cancellationToken);
+    if (conversation is null)
+    {
+        return Results.NotFound();
+    }
+
+    var messages = await store.ListMessagesAsync(id, cancellationToken);
+    return Results.Ok(new { conversation, messages });
+});
+
+app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
+    Guid id,
+    ChatTurnRequest body,
+    IChatStore store,
+    ChatAgentService agent,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(body?.Content))
+    {
+        return Results.BadRequest(new { error = "A non-empty 'content' is required." });
+    }
+
+    var conversation = await store.GetConversationAsync(id, cancellationToken);
+    if (conversation is null)
+    {
+        return Results.NotFound();
+    }
+
+    var content = body.Content.Trim();
+    var history = await store.ListMessagesAsync(id, cancellationToken);
+
+    // The question is stored before the model runs, so a failed or cancelled turn still leaves the
+    // conversation showing what was asked.
+    var question = await store.AppendMessageAsync(id, ChatMessageRole.User, content, [], cancellationToken);
+
+    // A conversation created from the sidebar has no title until its first question supplies one.
+    var renamed = conversation.Title;
+    if (history.Count == 0 && conversation.Title == "New chat")
+    {
+        renamed = content.Length <= 60 ? content : content[..60].TrimEnd() + "…";
+        await store.RenameConversationAsync(id, renamed, cancellationToken);
+    }
+
+    ChatTurn turn;
+    try
+    {
+        turn = await agent.RunAsync(history, content, conversation.UserId, cancellationToken);
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+        logger.LogError(ex, "The chat agent failed while answering in conversation {ConversationId}.", id);
+        return Results.Json(
+            new { error = $"The assistant could not answer: {ex.Message}" },
+            statusCode: StatusCodes.Status502BadGateway);
+    }
+
+    var answer = await store.AppendMessageAsync(id, ChatMessageRole.Assistant, turn.Text, turn.Citations, cancellationToken);
+    return Results.Ok(new { question, answer, title = renamed });
+});
+
+app.MapGet("/api/chat/feedback", async (
+    IChatStore store,
+    CancellationToken cancellationToken,
+    ChatFeedback? feedback = null,
+    string? search = null,
+    int skip = 0,
+    int top = 20) =>
+{
+    if (top is < 1 or > 100)
+    {
+        return Results.BadRequest(new { error = "'top' must be between 1 and 100." });
+    }
+
+    return Results.Ok(await store.ListFeedbackAsync(feedback, search, Math.Max(0, skip), top, cancellationToken));
+});
+
+app.MapPost("/api/chat/messages/{id:guid}/feedback", async (
+    Guid id,
+    MessageFeedback body,
+    IChatStore store,
+    CancellationToken cancellationToken) =>
+    await store.SetFeedbackAsync(id, body?.Feedback, cancellationToken)
+        ? Results.Ok(new { id, feedback = body?.Feedback })
+        : Results.NotFound());
+
 app.Run();
 
 /// <summary>
@@ -267,5 +383,16 @@ public sealed record SubscriptionLifetime(int? Days);
 /// service does not treat as its own.
 /// </summary>
 public sealed record CreateSubscriptionRequest(int? Days, string? NotificationUrl);
+
+/// <summary>
+/// A new conversation. <see cref="UserId"/> is optional and, when given, restricts every search the
+/// assistant runs in that conversation to what the user is allowed to see.
+/// </summary>
+public sealed record NewConversation(string? Title, string? UserId);
+
+public sealed record ChatTurnRequest(string? Content);
+
+/// <summary>A reaction to one answer. A null <see cref="Feedback"/> clears an earlier one.</summary>
+public sealed record MessageFeedback(ChatFeedback? Feedback);
 
 public partial class Program;

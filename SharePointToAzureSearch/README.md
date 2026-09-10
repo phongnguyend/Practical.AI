@@ -375,6 +375,26 @@ Microsoft Graph cannot `PATCH` a subscription's notification URL, so `PUT` appli
 
 **These endpoints change tenant state and are unauthenticated like the rest.** `DELETE` in particular stops change notifications, leaving the scheduled synchronization as the only trigger.
 
+## Chat assistant
+
+An agent built with the [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/) (`Microsoft.Agents.AI.OpenAI`) answers questions about the indexed library. It runs on `AzureOpenAI:ChatDeployment` — `gpt-5-mini` by default, on the same resource and endpoint as the embedding deployment — and is given exactly one tool: a hybrid search over this solution's index. Its instructions tell it to search before answering anything about document content and to say so plainly when the index does not cover the question, rather than answering from the model's own knowledge.
+
+Conversations and messages are stored in the same SQL Server database, in `SqlServer:ChatConversationTableName` and `SqlServer:ChatMessageTableName` (`ChatConversations` and `ChatMessages`), created on first use like the worker's tables. Each turn replays the stored history — the last 40 messages — so the agent needs no state of its own between requests, and the documents the tool retrieved are saved with the answer as citations.
+
+| Endpoint | Effect |
+| --- | --- |
+| `GET /api/chat/conversations` | Every conversation, most recently updated first |
+| `POST /api/chat/conversations` | Starts one. Body `{ "title": …, "userId": … }`, both optional |
+| `DELETE /api/chat/conversations/{id}` | Removes the conversation and its messages |
+| `GET /api/chat/conversations/{id}/messages` | The conversation and its full thread |
+| `POST /api/chat/conversations/{id}/messages` | Runs one turn. Body `{ "content": "…" }`; returns the stored question, the answer with its citations, and the conversation title |
+| `POST /api/chat/messages/{id}/feedback` | Rates an answer. Body `{ "feedback": "Like" \| "Dislike" \| null }`, where null clears an earlier rating |
+| `GET /api/chat/feedback` | Every rated answer, newest first, each with the question that prompted it and the documents it cited. `feedback` narrows to one rating, `search` matches the answer or the conversation title, `skip` and `top` (1-100, default 20) page it. The `liked` and `disliked` totals ignore the rating filter, so they hold still while it is toggled |
+
+A conversation created with a `userId` passes it to every search the assistant runs in that conversation, so answers are restricted to what that user may view — the same filter the search endpoints apply. **Without one the assistant searches the whole index**, so an unauthenticated deployment lets any caller read any indexed document through it.
+
+The first question replaces the placeholder title, so conversations name themselves. The question is stored before the model runs, so a turn that fails still shows what was asked.
+
 ## Front end
 
 `frontend/` is a React and Vite app over these endpoints: the two state tables, and the three retrieval strategies run one at a time or all three side by side. See [frontend/README.md](frontend/README.md).

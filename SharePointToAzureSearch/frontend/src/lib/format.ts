@@ -55,6 +55,23 @@ export function formatRelative(value: string | null | undefined): string {
   return 'just now'
 }
 
+const TIME_OF_DAY = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' })
+
+/**
+ * The clock time a message was sent, which is what a reader scans a conversation for. Older than
+ * today it carries the date as well, so a thread spanning days stays unambiguous.
+ */
+export function formatMessageTime(value: string | null | undefined): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+
+  const time = TIME_OF_DAY.format(date)
+  return date.toDateString() === new Date().toDateString()
+    ? time
+    : `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${time}`
+}
+
 export function formatDuration(milliseconds: number): string {
   return milliseconds < 1000
     ? `${Math.round(milliseconds)} ms`

@@ -9,7 +9,17 @@ namespace SharePointToAzureSearch.Core;
 /// One table in the worker's SQL Server database, created on first use unless
 /// <see cref="SqlServerOptions.AutoCreateTables"/> is false.
 /// </summary>
-internal sealed class SqlTable(SqlServerOptions options, ILogger logger, string tableName, string columns, string keyColumns)
+/// <param name="addedColumns">
+/// Columns introduced after the table shipped, as name and definition. They are added when missing, so
+/// a database created by an earlier version gains them without a migration step of its own.
+/// </param>
+internal sealed class SqlTable(
+    SqlServerOptions options,
+    ILogger logger,
+    string tableName,
+    string columns,
+    string keyColumns,
+    IReadOnlyList<(string Name, string Definition)>? addedColumns = null)
 {
     // The table is prepared once per process; the gate keeps concurrent first calls to one CREATE attempt.
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -37,7 +47,11 @@ internal sealed class SqlTable(SqlServerOptions options, ILogger logger, string 
     public SqlCommand CreateCommand(SqlConnection connection, string text) =>
         new(text, connection) { CommandTimeout = options.CommandTimeoutSeconds };
 
-    private async Task EnsureAsync(SqlConnection connection, CancellationToken cancellationToken)
+    /// <summary>
+    /// Creates the table if it is missing. Public so that a query spanning two tables can make sure
+    /// the second one exists on the connection it already holds.
+    /// </summary>
+    public async Task EnsureAsync(SqlConnection connection, CancellationToken cancellationToken)
     {
         if (_ready || !options.AutoCreateTables)
         {
@@ -52,6 +66,12 @@ internal sealed class SqlTable(SqlServerOptions options, ILogger logger, string 
                 return;
             }
 
+            var additions = string.Concat((addedColumns ?? []).Select(column => $"""
+
+                IF COL_LENGTH(N'{EscapeLiteral(Name)}', N'{EscapeLiteral(column.Name)}') IS NULL
+                    ALTER TABLE {Name} ADD {QuoteName(column.Name)} {column.Definition};
+                """));
+
             await using var command = CreateCommand(connection, $"""
                 IF OBJECT_ID(N'{EscapeLiteral(Name)}', N'U') IS NULL
                 BEGIN
@@ -61,6 +81,7 @@ internal sealed class SqlTable(SqlServerOptions options, ILogger logger, string 
                         CONSTRAINT {QuoteName($"PK_{tableName}")} PRIMARY KEY ({keyColumns})
                     );
                 END
+                {additions}
                 """);
             await command.ExecuteNonQueryAsync(cancellationToken);
             _ready = true;

@@ -6,7 +6,9 @@ import {
   LayoutDashboard,
   Monitor,
   Moon,
+  Scale,
   Search,
+  Sparkles,
   Sun,
   Webhook,
 } from 'lucide-react'
@@ -15,6 +17,8 @@ import IndexedFilesPage from './pages/IndexedFilesPage'
 import DeltaStatePage from './pages/DeltaStatePage'
 import SearchPage from './pages/SearchPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
+import ChatPage from './pages/ChatPage'
+import FeedbackPage from './pages/FeedbackPage'
 
 type Theme = 'system' | 'light' | 'dark'
 
@@ -71,6 +75,14 @@ export default function App() {
             <Search size={16} />
             Search
           </NavLink>
+          <NavLink to="/chat">
+            <Sparkles size={16} />
+            Chat
+          </NavLink>
+          <NavLink to="/feedback">
+            <Scale size={16} />
+            Feedback
+          </NavLink>
         </nav>
         <button
           className="ghost"
@@ -90,6 +102,8 @@ export default function App() {
           <Route path="/delta" element={<DeltaStatePage />} />
           <Route path="/subscriptions" element={<SubscriptionsPage />} />
           <Route path="/search" element={<SearchPage />} />
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/feedback" element={<FeedbackPage />} />
           <Route path="*" element={<Navigate to="/overview" replace />} />
         </Routes>
       </main>

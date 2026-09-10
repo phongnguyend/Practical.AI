@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { copyText } from '../lib/clipboard'
 import {
   Check,
   ChevronLeft,
@@ -172,7 +173,7 @@ export function CopyButton({ value, label = 'Copy' }: { value: string; label?: s
       className="ghost"
       title={`Copy ${value}`}
       onClick={() => {
-        void navigator.clipboard?.writeText(value).then(() => setCopied(true))
+        void copyText(value).then((ok) => setCopied(ok))
       }}
     >
       {copied ? <Check size={13} color="var(--good)" /> : <Copy size={13} />}
