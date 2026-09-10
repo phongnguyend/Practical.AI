@@ -31,6 +31,7 @@ import {
   folderLabel,
   formatDateTime,
   formatMessageTime,
+  formatNumber,
   formatRelative,
   formatScore,
 } from '../lib/format'
@@ -379,7 +380,7 @@ function ConversationRow({
         <span className="chat-conversation-title">{item.title}</span>
         <span className="chat-conversation-meta">
           {formatRelative(item.updatedAtUtc)} · {item.messageCount}{' '}
-          {item.messageCount === 1 ? 'message' : 'messages'}
+          {item.messageCount === 1 ? 'message' : 'messages'} · {formatNumber(item.totalTokenCount)} tokens
         </span>
       </button>
       {confirming ? (

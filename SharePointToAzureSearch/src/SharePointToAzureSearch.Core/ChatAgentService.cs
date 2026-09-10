@@ -9,8 +9,11 @@ using AIChatRole = Microsoft.Extensions.AI.ChatRole;
 
 namespace SharePointToAzureSearch.Core;
 
-/// <summary>One assistant turn: what it said, and the documents it retrieved to say it.</summary>
-public sealed record ChatTurn(string Text, IReadOnlyList<ChatCitation> Citations);
+/// <summary>One assistant turn: what it said, what it retrieved, and the model usage it incurred.</summary>
+public sealed record ChatTurn(string Text, IReadOnlyList<ChatCitation> Citations, ChatTokenUsage Usage);
+
+/// <summary>Tokens consumed across every model request in an agent turn, including tool round trips.</summary>
+public sealed record ChatTokenUsage(long InputTokens, long OutputTokens, long TotalTokens);
 
 /// <summary>
 /// The chat assistant. It runs on the Azure OpenAI chat deployment configured alongside the embedding
@@ -150,6 +153,9 @@ public sealed class ChatAgentService(
         // agent needs no memory of its own and nothing has to be kept alive between requests.
         var session = await agent.CreateSessionAsync(cancellationToken);
         var answer = new StringBuilder();
+        long inputTokens = 0;
+        long outputTokens = 0;
+        long totalTokens = 0;
         await ReportStatusAsync("Thinking…", cancellationToken);
 
         await foreach (var update in agent.RunStreamingAsync(
@@ -160,7 +166,15 @@ public sealed class ChatAgentService(
         {
             foreach (var content in update.Contents)
             {
-                if (content is FunctionCallContent functionCall)
+                if (content is UsageContent usage)
+                {
+                    var turnInputTokens = usage.Details.InputTokenCount ?? 0;
+                    var turnOutputTokens = usage.Details.OutputTokenCount ?? 0;
+                    inputTokens += turnInputTokens;
+                    outputTokens += turnOutputTokens;
+                    totalTokens += usage.Details.TotalTokenCount ?? turnInputTokens + turnOutputTokens;
+                }
+                else if (content is FunctionCallContent functionCall)
                 {
                     await ReportStatusAsync(StatusForTool(functionCall.Name), cancellationToken);
                 }
@@ -190,14 +204,15 @@ public sealed class ChatAgentService(
         }
 
         logger.LogInformation(
-            "Chat turn answered with {Searches} search call(s), {Downloads} download call(s), {Refreshes} refresh call(s), {Uploads} upload call(s) and {Citations} citation(s).",
+            "Chat turn answered with {Searches} search call(s), {Downloads} download call(s), {Refreshes} refresh call(s), {Uploads} upload call(s), {Citations} citation(s), and {TotalTokens} token(s).",
             turnTools.SearchCount,
             turnTools.DownloadCount,
             turnTools.RefreshCount,
             turnTools.UploadCount,
-            turnTools.Citations.Count);
+            turnTools.Citations.Count,
+            totalTokens);
 
-        return new ChatTurn(text, turnTools.Citations);
+        return new ChatTurn(text, turnTools.Citations, new ChatTokenUsage(inputTokens, outputTokens, totalTokens));
     }
 
     private static string StatusForTool(string? name) => name switch

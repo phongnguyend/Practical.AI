@@ -78,6 +78,9 @@ export interface ChatConversation {
   createdAtUtc: string
   updatedAtUtc: string
   messageCount: number
+  inputTokenCount: number
+  outputTokenCount: number
+  totalTokenCount: number
 }
 
 /** A document excerpt the assistant retrieved to answer with. */

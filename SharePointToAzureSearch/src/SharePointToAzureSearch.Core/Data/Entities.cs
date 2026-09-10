@@ -46,6 +46,9 @@ public sealed class ChatConversationEntity
     public string? UserId { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
+    public long InputTokenCount { get; set; }
+    public long OutputTokenCount { get; set; }
+    public long TotalTokenCount { get; set; }
 
     public ICollection<ChatMessageEntity> Messages { get; set; } = [];
 }

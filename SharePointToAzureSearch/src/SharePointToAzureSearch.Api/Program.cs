@@ -243,7 +243,7 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
 
     // The question is stored before the model runs, so a failed or cancelled turn still leaves the
     // conversation showing what was asked.
-    var question = await store.AppendMessageAsync(id, ChatMessageRole.User, content, [], cancellationToken);
+    var question = await store.AppendMessageAsync(id, ChatMessageRole.User, content, [], null, cancellationToken);
 
     // A conversation created from the sidebar has no title until its first question supplies one.
     var renamed = conversation.Title;
@@ -297,7 +297,8 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
         return Results.Empty;
     }
 
-    var answer = await store.AppendMessageAsync(id, ChatMessageRole.Assistant, turn.Text, turn.Citations, cancellationToken);
+    var answer = await store.AppendMessageAsync(
+        id, ChatMessageRole.Assistant, turn.Text, turn.Citations, turn.Usage, cancellationToken);
     await WriteEventAsync(new ChatStreamEvent("completed", Answer: answer, Title: renamed), cancellationToken);
     return Results.Empty;
 });

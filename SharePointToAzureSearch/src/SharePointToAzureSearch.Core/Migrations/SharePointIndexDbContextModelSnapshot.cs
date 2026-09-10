@@ -31,10 +31,19 @@ namespace SharePointToAzureSearch.Core.Migrations
                         .HasPrecision(7)
                         .HasColumnType("datetimeoffset(7)");
 
+                    b.Property<long>("InputTokenCount")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OutputTokenCount")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<long>("TotalTokenCount")
+                        .HasColumnType("bigint");
 
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasPrecision(7)
