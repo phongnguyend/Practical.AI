@@ -130,7 +130,7 @@ export interface ChatMessageAttachment {
 
 export type UploadIndexStatus = 'NotStarted' | 'Indexing' | 'Indexed' | 'Failed'
 
-export interface UploadRecord {
+export interface AttachmentFileRecord {
   id: string
   fileName: string
   contentType: string | null
@@ -141,6 +141,11 @@ export interface UploadRecord {
   createdAtUtc: string
   updatedAtUtc: string
   indexedAtUtc: string | null
+  chatMessageAttachmentId: string | null
+  messageId: string | null
+  conversationId: string | null
+  conversationTitle: string | null
+  isOrphan: boolean
 }
 
 /** One rated answer, with the question that prompted it. */

@@ -109,7 +109,7 @@ public sealed class ChatMessageEntity
     public ICollection<ChatMessageAttachmentEntity> Attachments { get; set; } = [];
 }
 
-public sealed class UploadEntity
+public sealed class ChatMessageAttachmentFileEntity
 {
     public Guid Id { get; set; }
     public string FileName { get; set; } = "";
@@ -122,6 +122,8 @@ public sealed class UploadEntity
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
     public DateTimeOffset? IndexedAtUtc { get; set; }
+    public Guid? ChatMessageAttachmentId { get; set; }
+    public ChatMessageAttachmentEntity? ChatMessageAttachment { get; set; }
     public ICollection<ChatMessageAttachmentEntity> MessageAttachments { get; set; } = [];
 }
 
@@ -129,8 +131,8 @@ public sealed class ChatMessageAttachmentEntity
 {
     public Guid Id { get; set; }
     public Guid MessageId { get; set; }
-    public Guid UploadId { get; set; }
+    public Guid AttachmentFileId { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public ChatMessageEntity? Message { get; set; }
-    public UploadEntity? Upload { get; set; }
+    public ChatMessageAttachmentFileEntity? AttachmentFile { get; set; }
 }

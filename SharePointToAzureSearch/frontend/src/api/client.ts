@@ -18,7 +18,7 @@ import type {
   SubscriptionView,
   UpdateSubscriptionResult,
   TimedSearch,
-  UploadRecord,
+  AttachmentFileRecord,
 } from './types'
 
 /** Empty by default, so requests go to the dev server's /api proxy on this same origin. */
@@ -146,7 +146,7 @@ export function getThread(id: string, signal?: AbortSignal): Promise<ChatThread>
 export async function sendChatMessage(
   id: string,
   content: string,
-  uploadIds: string[],
+  attachmentFileIds: string[],
   onEvent: (event: ChatStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<ChatTurnResult> {
@@ -160,7 +160,7 @@ export async function sendChatMessage(
           Accept: 'application/x-ndjson',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ content, uploadIds }),
+        body: JSON.stringify({ content, attachmentFileIds }),
         signal,
       },
     )
@@ -215,25 +215,31 @@ export async function sendChatMessage(
   return { question, answer, title }
 }
 
-export async function uploadFile(file: File, signal?: AbortSignal): Promise<UploadRecord> {
+export async function uploadAttachmentFile(file: File, signal?: AbortSignal): Promise<AttachmentFileRecord> {
   const body = new FormData()
   body.append('file', file)
-  return request<UploadRecord>('/api/uploads', { method: 'POST', body, signal })
+  return request<AttachmentFileRecord>('/api/attachment-files', { method: 'POST', body, signal })
 }
 
-export function listUploads(
+export function listAttachmentFiles(
   options: { search?: string; skip?: number; top?: number },
   signal?: AbortSignal,
-): Promise<PagedResult<UploadRecord>> {
-  return request<PagedResult<UploadRecord>>(`/api/uploads${query({ ...options })}`, { signal })
+): Promise<PagedResult<AttachmentFileRecord>> {
+  return request<PagedResult<AttachmentFileRecord>>(`/api/attachment-files${query({ ...options })}`, { signal })
 }
 
-export function reindexUpload(id: string): Promise<UploadRecord> {
-  return request<UploadRecord>(`/api/uploads/${encodeURIComponent(id)}/reindex`, { method: 'POST' })
+export function reindexAttachmentFile(id: string): Promise<AttachmentFileRecord> {
+  return request<AttachmentFileRecord>(`/api/attachment-files/${encodeURIComponent(id)}/reindex`, { method: 'POST' })
 }
 
-export function uploadDownloadUrl(id: string): string {
-  return `${BASE_URL}/api/uploads/${encodeURIComponent(id)}/download`
+export function attachmentFileDownloadUrl(id: string): string {
+  return `${BASE_URL}/api/attachment-files/${encodeURIComponent(id)}/download`
+}
+
+export function deleteOrphanAttachmentFile(id: string): Promise<{ deleted: string }> {
+  return request<{ deleted: string }>(`/api/attachment-files/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
 }
 
 export function listAgents(signal?: AbortSignal): Promise<AgentDefinition[]> {

@@ -645,6 +645,7 @@ button {
   border-radius: var(--radius-sm);
   padding: 7px 12px;
   font-weight: 500;
+  color: var(--text-primary);
   white-space: nowrap;
 }
 
@@ -669,6 +670,9 @@ button.primary {
 }
 
 button.primary:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
   filter: brightness(1.07);
 }
 
@@ -680,6 +684,9 @@ button.danger {
 }
 
 button.danger:hover:not(:disabled) {
+  background: var(--critical);
+  border-color: var(--critical);
+  color: #fff;
   filter: brightness(1.07);
 }
 
@@ -1374,6 +1381,17 @@ button.ghost:hover:not(:disabled) {
   margin-top: 4px;
   color: var(--critical);
   font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -114,7 +114,7 @@ public interface IChatStore
         IReadOnlyList<ChatCitation> citations,
         ChatTokenUsage? usage,
         string? modelId,
-        IReadOnlyCollection<Guid> uploadIds,
+        IReadOnlyCollection<Guid> attachmentFileIds,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -260,7 +260,7 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
             CreatedAtUtc = message.CreatedAtUtc,
             Attachments = [.. message.Attachments.Select(attachment => new ChatMessageAttachmentEntity
             {
-                UploadId = attachment.UploadId,
+                AttachmentFileId = attachment.AttachmentFileId,
                 CreatedAtUtc = now,
             })],
         }));
@@ -302,7 +302,7 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
         var rows = await context.ChatMessages
             .AsNoTracking()
             .Include(m => m.Attachments)
-            .ThenInclude(a => a.Upload)
+            .ThenInclude(a => a.AttachmentFile)
             .Where(m => m.ConversationId == conversationId)
             .OrderBy(m => m.Sequence)
             .ToListAsync(cancellationToken);
@@ -316,7 +316,7 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
         IReadOnlyList<ChatCitation> citations,
         ChatTokenUsage? usage,
         string? modelId,
-        IReadOnlyCollection<Guid> uploadIds,
+        IReadOnlyCollection<Guid> attachmentFileIds,
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
@@ -348,27 +348,46 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
         };
         context.ChatMessages.Add(entity);
 
-        var distinctUploadIds = uploadIds.Distinct().ToArray();
-        var attachedUploads = distinctUploadIds.Length == 0
+        var distinctFileIds = attachmentFileIds.Distinct().ToArray();
+        var attachedFiles = distinctFileIds.Length == 0
             ? []
-            : await context.Uploads.AsNoTracking()
-                .Where(x => distinctUploadIds.Contains(x.Id))
+            : await context.ChatMessageAttachmentFiles
+                .Where(x => distinctFileIds.Contains(x.Id) && x.ChatMessageAttachmentId == null)
                 .ToListAsync(cancellationToken);
-        if (attachedUploads.Count != distinctUploadIds.Length)
+        if (attachedFiles.Count != distinctFileIds.Length)
         {
-            throw new InvalidOperationException("One or more attachment IDs do not exist.");
+            throw new InvalidOperationException("One or more attachment files do not exist or are already linked to a message.");
         }
-        entity.Attachments = [.. attachedUploads.Select(upload => new ChatMessageAttachmentEntity
+        entity.Attachments = [.. attachedFiles.Select(file => new ChatMessageAttachmentEntity
         {
-            UploadId = upload.Id,
+            AttachmentFileId = file.Id,
             CreatedAtUtc = now,
         })];
         await context.SaveChangesAsync(cancellationToken);
 
+        // The link ID is database-generated, so the file can only point back to it after the first save.
+        // Keeping this second write in the transaction means a file is never committed as linked unless
+        // its ChatMessageAttachment row was successfully created too.
+        foreach (var file in attachedFiles)
+        {
+            var attachmentId = entity.Attachments
+                .Single(attachment => attachment.AttachmentFileId == file.Id).Id;
+            var claimed = await context.ChatMessageAttachmentFiles
+                .Where(candidate => candidate.Id == file.Id && candidate.ChatMessageAttachmentId == null)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(candidate => candidate.ChatMessageAttachmentId, attachmentId),
+                    cancellationToken);
+            if (claimed != 1)
+            {
+                throw new InvalidOperationException(
+                    $"Attachment file '{file.FileName}' was linked to another message while this message was being saved.");
+            }
+        }
+
         var record = new ChatMessageRecord(
             entity.Id, conversationId, role, content, citations,
             inputTokens, outputTokens, totalTokens, modelId, null,
-            [.. attachedUploads.Select(ToAttachment)], now);
+            [.. attachedFiles.Select(ToAttachment)], now);
 
         // The conversation list is ordered by this, so it moves to the top on every turn.
         await context.ChatConversations
@@ -478,10 +497,10 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
         row.TotalTokenCount,
         row.ModelId,
         row.Feedback,
-        [.. row.Attachments.Where(x => x.Upload is not null).Select(x => ToAttachment(x.Upload!))],
+        [.. row.Attachments.Where(x => x.AttachmentFile is not null).Select(x => ToAttachment(x.AttachmentFile!))],
         row.CreatedAtUtc);
 
-    private static ChatMessageAttachment ToAttachment(UploadEntity row) =>
+    private static ChatMessageAttachment ToAttachment(ChatMessageAttachmentFileEntity row) =>
         new(row.Id, row.FileName, row.ContentType, row.SizeBytes);
 
     private static IReadOnlyList<ChatCitation> ReadCitations(string? json) =>

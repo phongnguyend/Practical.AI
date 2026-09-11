@@ -22,7 +22,7 @@ import SubscriptionsPage from './pages/SubscriptionsPage'
 import ChatPage from './pages/ChatPage'
 import FeedbackPage from './pages/FeedbackPage'
 import AgentsPage from './pages/AgentsPage'
-import UploadsPage from './pages/UploadsPage'
+import AttachmentFilesPage from './pages/AttachmentFilesPage'
 
 type Theme = 'system' | 'light' | 'dark'
 
@@ -87,9 +87,9 @@ export default function App() {
             <Scale size={16} />
             Feedback
           </NavLink>
-          <NavLink to="/uploads">
+          <NavLink to="/attachment-files">
             <Upload size={16} />
-            Uploads
+            Attachment files
           </NavLink>
           <NavLink to="/agents">
             <Bot size={16} />
@@ -111,7 +111,7 @@ export default function App() {
           <Route path="/" element={<Navigate to="/overview" replace />} />
           <Route path="/overview" element={<OverviewPage />} />
           <Route path="/files" element={<IndexedFilesPage />} />
-          <Route path="/uploads" element={<UploadsPage />} />
+          <Route path="/attachment-files" element={<AttachmentFilesPage />} />
           <Route path="/delta" element={<DeltaStatePage />} />
           <Route path="/subscriptions" element={<SubscriptionsPage />} />
           <Route path="/search" element={<SearchPage />} />

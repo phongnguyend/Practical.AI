@@ -80,7 +80,7 @@ public static class DependencyInjection
         return services;
     }
 
-    public static IServiceCollection AddUploadServices(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddAttachmentFileServices(this IServiceCollection services, IConfiguration configuration)
     {
         AddDatabase(services, configuration);
         AddSearchOptions(services, configuration);
@@ -111,7 +111,7 @@ public static class DependencyInjection
                 ? new SearchIndexClient(new Uri(options.Endpoint), CreateManagedIdentityCredential())
                 : new SearchIndexClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey!));
         });
-        services.AddSingleton<UploadService>();
+        services.AddSingleton<ChatMessageAttachmentFileService>();
         return services;
     }
 

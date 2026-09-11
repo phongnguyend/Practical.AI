@@ -23,7 +23,7 @@ public enum UploadIndexStatus
     Failed
 }
 
-public sealed record UploadRecord(
+public sealed record AttachmentFileRecord(
     Guid Id,
     string FileName,
     string? ContentType,
@@ -33,16 +33,24 @@ public sealed record UploadRecord(
     string? ErrorMessage,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
-    DateTimeOffset? IndexedAtUtc);
+    DateTimeOffset? IndexedAtUtc,
+    Guid? ChatMessageAttachmentId,
+    Guid? MessageId,
+    Guid? ConversationId,
+    string? ConversationTitle,
+    bool IsOrphan);
 
-public sealed record UploadPage(long TotalCount, IReadOnlyList<UploadRecord> Items);
+public sealed record AttachmentFilePage(long TotalCount, IReadOnlyList<AttachmentFileRecord> Items);
 
-public sealed record UploadDownload(Stream Content, string FileName, string ContentType);
+public sealed record AttachmentFileDownload(Stream Content, string FileName, string ContentType);
 
 public sealed class UploadTooLargeException(long maximumBytes)
     : InvalidOperationException($"The file exceeds the {maximumBytes:N0}-byte upload limit.");
 
-public sealed class UploadService(
+public sealed class AttachmentFileIsLinkedException()
+    : InvalidOperationException("Only orphan attachment files can be deleted.");
+
+public sealed class ChatMessageAttachmentFileService(
     IDbContextFactory<SharePointIndexDbContext> contextFactory,
     BlobServiceClient blobService,
     SearchIndexClient indexClient,
@@ -50,7 +58,7 @@ public sealed class UploadService(
     IEmbeddingGenerator<string, Embedding<float>> embeddings,
     IOptions<UploadOptions> uploadOptions,
     IOptions<SearchOptions> searchOptions,
-    ILogger<UploadService> logger)
+    ILogger<ChatMessageAttachmentFileService> logger)
 {
     private readonly UploadOptions _uploads = uploadOptions.Value;
     private readonly SearchOptions _search = searchOptions.Value;
@@ -60,7 +68,7 @@ public sealed class UploadService(
     private BlobContainerClient Container => blobService.GetBlobContainerClient(_uploads.ContainerName);
     private SearchClient Search => indexClient.GetSearchClient(_search.UploadIndexName);
 
-    public async Task<UploadRecord> CreateAsync(
+    public async Task<AttachmentFileRecord> CreateAsync(
         string fileName,
         string? contentType,
         long sizeBytes,
@@ -88,7 +96,7 @@ public sealed class UploadService(
 
         await using (var context = await contextFactory.CreateDbContextAsync(cancellationToken))
         {
-            context.Uploads.Add(new UploadEntity
+            context.ChatMessageAttachmentFiles.Add(new ChatMessageAttachmentFileEntity
             {
                 Id = id,
                 FileName = safeName,
@@ -105,40 +113,81 @@ public sealed class UploadService(
         return await IndexAsync(id, cancellationToken);
     }
 
-    public async Task<UploadRecord?> ReindexAsync(Guid id, CancellationToken cancellationToken)
+    public async Task<AttachmentFileRecord?> ReindexAsync(Guid id, CancellationToken cancellationToken)
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        if (!await context.Uploads.AnyAsync(x => x.Id == id, cancellationToken))
+        if (!await context.ChatMessageAttachmentFiles.AnyAsync(x => x.Id == id, cancellationToken))
         {
             return null;
         }
         return await IndexAsync(id, cancellationToken);
     }
 
-    public async Task<UploadPage> ListAsync(string? search, int skip, int top, CancellationToken cancellationToken)
+    public async Task<AttachmentFilePage> ListAsync(string? search, int skip, int top, CancellationToken cancellationToken)
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        var query = context.Uploads.AsNoTracking();
+        var query = context.ChatMessageAttachmentFiles.AsNoTracking();
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim();
             query = query.Where(x => x.FileName.Contains(term));
         }
         var total = await query.LongCountAsync(cancellationToken);
-        var rows = await query.OrderByDescending(x => x.CreatedAtUtc).Skip(skip).Take(top).ToListAsync(cancellationToken);
-        return new UploadPage(total, [.. rows.Select(ToRecord)]);
+        var rows = await query.OrderByDescending(x => x.CreatedAtUtc).Skip(skip).Take(top)
+            .Select(x => new AttachmentFileRecord(
+                x.Id, x.FileName, x.ContentType, x.SizeBytes, x.Status, x.ChunkCount,
+                x.ErrorMessage, x.CreatedAtUtc, x.UpdatedAtUtc, x.IndexedAtUtc,
+                x.ChatMessageAttachmentId,
+                x.ChatMessageAttachment != null
+                    ? x.ChatMessageAttachment.MessageId
+                    : x.MessageAttachments.OrderBy(a => a.CreatedAtUtc).Select(a => (Guid?)a.MessageId).FirstOrDefault(),
+                x.ChatMessageAttachment != null
+                    ? x.ChatMessageAttachment.Message!.ConversationId
+                    : x.MessageAttachments.OrderBy(a => a.CreatedAtUtc).Select(a => (Guid?)a.Message!.ConversationId).FirstOrDefault(),
+                x.ChatMessageAttachment != null
+                    ? x.ChatMessageAttachment.Message!.Conversation!.Title
+                    : x.MessageAttachments.OrderBy(a => a.CreatedAtUtc).Select(a => a.Message!.Conversation!.Title).FirstOrDefault(),
+                !x.MessageAttachments.Any()))
+            .ToListAsync(cancellationToken);
+        return new AttachmentFilePage(total, rows);
     }
 
-    public async Task<UploadDownload?> DownloadAsync(Guid id, CancellationToken cancellationToken)
+    public async Task<AttachmentFileDownload?> DownloadAsync(Guid id, CancellationToken cancellationToken)
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        var row = await context.Uploads.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        var row = await context.ChatMessageAttachmentFiles.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (row is null)
         {
             return null;
         }
         var response = await Container.GetBlobClient(row.BlobName).DownloadStreamingAsync(cancellationToken: cancellationToken);
-        return new UploadDownload(response.Value.Content, row.FileName, row.ContentType ?? "application/octet-stream");
+        return new AttachmentFileDownload(response.Value.Content, row.FileName, row.ContentType ?? "application/octet-stream");
+    }
+
+    public async Task<bool> DeleteOrphanAsync(Guid id, CancellationToken cancellationToken)
+    {
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(
+            System.Data.IsolationLevel.Serializable,
+            cancellationToken);
+        var row = await context.ChatMessageAttachmentFiles.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (row is null)
+        {
+            return false;
+        }
+        if (row.ChatMessageAttachmentId is not null
+            || await context.ChatMessageAttachments.AnyAsync(x => x.AttachmentFileId == id, cancellationToken))
+        {
+            throw new AttachmentFileIsLinkedException();
+        }
+
+        await EnsureInfrastructureAsync(cancellationToken);
+        await DeleteIndexDocumentsAsync(id, cancellationToken);
+        await Container.GetBlobClient(row.BlobName).DeleteIfExistsAsync(cancellationToken: cancellationToken);
+        context.ChatMessageAttachmentFiles.Remove(row);
+        await context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return true;
     }
 
     public async Task<string> GetAttachmentContextAsync(
@@ -154,13 +203,17 @@ public sealed class UploadService(
         var distinctIds = uploadIds.Distinct().ToArray();
         await using (var context = await contextFactory.CreateDbContextAsync(cancellationToken))
         {
-            var ready = await context.Uploads.AsNoTracking()
-                .Where(x => distinctIds.Contains(x.Id) && x.Status == UploadIndexStatus.Indexed)
+            var ready = await context.ChatMessageAttachmentFiles.AsNoTracking()
+                .Where(x => distinctIds.Contains(x.Id)
+                            && x.Status == UploadIndexStatus.Indexed
+                            && x.ChatMessageAttachmentId == null
+                            && !x.MessageAttachments.Any())
                 .Select(x => x.Id)
                 .ToListAsync(cancellationToken);
             if (ready.Count != distinctIds.Length)
             {
-                throw new InvalidOperationException("Every attachment must be indexed successfully before it can be sent.");
+                throw new InvalidOperationException(
+                    "Every attachment file must be indexed successfully and not already linked to a message.");
             }
         }
 
@@ -190,12 +243,12 @@ public sealed class UploadService(
         return string.Join("\n\n", excerpts);
     }
 
-    private async Task<UploadRecord> IndexAsync(Guid id, CancellationToken cancellationToken)
+    private async Task<AttachmentFileRecord> IndexAsync(Guid id, CancellationToken cancellationToken)
     {
-        UploadEntity row;
+        ChatMessageAttachmentFileEntity row;
         await using (var context = await contextFactory.CreateDbContextAsync(cancellationToken))
         {
-            row = await context.Uploads.SingleAsync(x => x.Id == id, cancellationToken);
+            row = await context.ChatMessageAttachmentFiles.SingleAsync(x => x.Id == id, cancellationToken);
             row.Status = UploadIndexStatus.Indexing;
             row.ErrorMessage = null;
             row.UpdatedAtUtc = DateTimeOffset.UtcNow;
@@ -242,14 +295,14 @@ public sealed class UploadService(
         }
 
         await using var resultContext = await contextFactory.CreateDbContextAsync(cancellationToken);
-        return ToRecord(await resultContext.Uploads.AsNoTracking().SingleAsync(x => x.Id == id, cancellationToken));
+        return (await ListByIdAsync(resultContext, id, cancellationToken))!;
     }
 
     private async Task SetOutcomeAsync(Guid id, UploadIndexStatus status, int chunks, string? error, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        await context.Uploads.Where(x => x.Id == id).ExecuteUpdateAsync(setters => setters
+        await context.ChatMessageAttachmentFiles.Where(x => x.Id == id).ExecuteUpdateAsync(setters => setters
             .SetProperty(x => x.Status, status)
             .SetProperty(x => x.ChunkCount, chunks)
             .SetProperty(x => x.ErrorMessage, error == null ? null : error.Length <= 4000 ? error : error[..4000])
@@ -326,9 +379,26 @@ public sealed class UploadService(
         }
     }
 
-    private static UploadRecord ToRecord(UploadEntity row) => new(
-        row.Id, row.FileName, row.ContentType, row.SizeBytes, row.Status, row.ChunkCount,
-        row.ErrorMessage, row.CreatedAtUtc, row.UpdatedAtUtc, row.IndexedAtUtc);
+    private static Task<AttachmentFileRecord?> ListByIdAsync(
+        SharePointIndexDbContext context,
+        Guid id,
+        CancellationToken cancellationToken) => context.ChatMessageAttachmentFiles.AsNoTracking()
+        .Where(x => x.Id == id)
+        .Select(x => new AttachmentFileRecord(
+            x.Id, x.FileName, x.ContentType, x.SizeBytes, x.Status, x.ChunkCount,
+            x.ErrorMessage, x.CreatedAtUtc, x.UpdatedAtUtc, x.IndexedAtUtc,
+            x.ChatMessageAttachmentId,
+            x.ChatMessageAttachment != null
+                ? x.ChatMessageAttachment.MessageId
+                : x.MessageAttachments.OrderBy(a => a.CreatedAtUtc).Select(a => (Guid?)a.MessageId).FirstOrDefault(),
+            x.ChatMessageAttachment != null
+                ? x.ChatMessageAttachment.Message!.ConversationId
+                : x.MessageAttachments.OrderBy(a => a.CreatedAtUtc).Select(a => (Guid?)a.Message!.ConversationId).FirstOrDefault(),
+            x.ChatMessageAttachment != null
+                ? x.ChatMessageAttachment.Message!.Conversation!.Title
+                : x.MessageAttachments.OrderBy(a => a.CreatedAtUtc).Select(a => a.Message!.Conversation!.Title).FirstOrDefault(),
+            !x.MessageAttachments.Any()))
+        .SingleOrDefaultAsync(cancellationToken);
 }
 
 public sealed class UploadChunkDocument

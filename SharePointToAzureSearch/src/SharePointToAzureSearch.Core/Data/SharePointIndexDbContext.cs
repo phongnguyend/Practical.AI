@@ -20,7 +20,7 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
     public DbSet<IndexedFileEntity> IndexedFiles => Set<IndexedFileEntity>();
     public DbSet<ChatConversationEntity> ChatConversations => Set<ChatConversationEntity>();
     public DbSet<ChatMessageEntity> ChatMessages => Set<ChatMessageEntity>();
-    public DbSet<UploadEntity> Uploads => Set<UploadEntity>();
+    public DbSet<ChatMessageAttachmentFileEntity> ChatMessageAttachmentFiles => Set<ChatMessageAttachmentFileEntity>();
     public DbSet<ChatMessageAttachmentEntity> ChatMessageAttachments => Set<ChatMessageAttachmentEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -129,9 +129,9 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
             entity.HasIndex(x => x.Feedback).HasFilter("[Feedback] IS NOT NULL");
         });
 
-        modelBuilder.Entity<UploadEntity>(entity =>
+        modelBuilder.Entity<ChatMessageAttachmentFileEntity>(entity =>
         {
-            entity.ToTable("Uploads");
+            entity.ToTable("ChatMessageAttachmentFiles");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasDefaultValueSql("NEWSEQUENTIALID()").ValueGeneratedOnAdd();
             entity.Property(x => x.FileName).HasMaxLength(400).IsRequired();
@@ -144,6 +144,12 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
             entity.Property(x => x.IndexedAtUtc).HasPrecision(7);
             entity.HasIndex(x => x.CreatedAtUtc).IsDescending();
             entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.ChatMessageAttachmentId).IsUnique()
+                .HasFilter("[ChatMessageAttachmentId] IS NOT NULL");
+            entity.HasOne(x => x.ChatMessageAttachment)
+                .WithOne()
+                .HasForeignKey<ChatMessageAttachmentFileEntity>(x => x.ChatMessageAttachmentId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<ChatMessageAttachmentEntity>(entity =>
@@ -152,11 +158,11 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasDefaultValueSql("NEWSEQUENTIALID()").ValueGeneratedOnAdd();
             entity.Property(x => x.CreatedAtUtc).HasPrecision(7);
-            entity.HasIndex(x => new { x.MessageId, x.UploadId }).IsUnique();
+            entity.HasIndex(x => new { x.MessageId, x.AttachmentFileId }).IsUnique();
             entity.HasOne(x => x.Message).WithMany(x => x.Attachments)
                 .HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne(x => x.Upload).WithMany(x => x.MessageAttachments)
-                .HasForeignKey(x => x.UploadId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.AttachmentFile).WithMany(x => x.MessageAttachments)
+                .HasForeignKey(x => x.AttachmentFileId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

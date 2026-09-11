@@ -30,8 +30,8 @@ import {
   listConversations,
   sendChatMessage,
   setMessageFeedback,
-  uploadFile,
-  uploadDownloadUrl,
+  uploadAttachmentFile,
+  attachmentFileDownloadUrl,
 } from '../api/client'
 import type { ChatConversation, ChatFeedback, ChatMessage, ChatMessageAttachment } from '../api/types'
 import { Empty, ErrorBanner, Field, LoadingBar, Modal } from '../components/ui'
@@ -228,7 +228,7 @@ export default function ChatPage() {
     setError(null)
     try {
       for (const file of Array.from(files).slice(0, Math.max(0, 10 - attachments.length))) {
-        const uploaded = await uploadFile(file)
+        const uploaded = await uploadAttachmentFile(file)
         if (uploaded.status !== 'Indexed') {
           throw new Error(uploaded.errorMessage ?? `${uploaded.fileName} could not be indexed.`)
         }
@@ -614,7 +614,7 @@ function MessageBubble({
         {message.attachments.length > 0 ? (
           <div className="message-attachments">
             {message.attachments.map((file) => (
-              <a href={uploadDownloadUrl(file.id)} key={file.id} title={`Download ${file.fileName}`}>
+              <a href={attachmentFileDownloadUrl(file.id)} key={file.id} title={`Download ${file.fileName}`}>
                 <FileTypeIcon name={file.fileName} mimeType={file.contentType} size={14} />
                 <span>{file.fileName}</span>
                 <Download size={12} />

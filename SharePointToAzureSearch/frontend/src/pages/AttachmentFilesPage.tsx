@@ -1,6 +1,12 @@
 import { useState } from 'react'
-import { Download, RefreshCw, RotateCw, SearchX, Upload } from 'lucide-react'
-import { listUploads, reindexUpload, uploadDownloadUrl } from '../api/client'
+import { Link } from 'react-router-dom'
+import { Download, MessageSquare, Paperclip, RefreshCw, RotateCw, SearchX, Trash2, X } from 'lucide-react'
+import {
+  attachmentFileDownloadUrl,
+  deleteOrphanAttachmentFile,
+  listAttachmentFiles,
+  reindexAttachmentFile,
+} from '../api/client'
 import type { UploadIndexStatus } from '../api/types'
 import { Empty, ErrorBanner, LoadingBar, Pagination } from '../components/ui'
 import { FileTypeIcon } from '../components/FileTypeIcon'
@@ -21,14 +27,15 @@ const STATUS_CLASSES: Record<UploadIndexStatus, string> = {
   Failed: 'critical',
 }
 
-export default function UploadsPage() {
+export default function AttachmentFilesPage() {
   const [search, setSearch] = useState('')
   const [skip, setSkip] = useState(0)
   const [working, setWorking] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const debouncedSearch = useDebounced(search)
   const page = useAsync(
-    (signal) => listUploads({ search: debouncedSearch, skip, top: 25 }, signal),
+    (signal) => listAttachmentFiles({ search: debouncedSearch, skip, top: 25 }, signal),
     [debouncedSearch, skip],
   )
 
@@ -36,8 +43,22 @@ export default function UploadsPage() {
     setWorking(id)
     setActionError(null)
     try {
-      const result = await reindexUpload(id)
+      const result = await reindexAttachmentFile(id)
       if (result.status === 'Failed') setActionError(result.errorMessage ?? 'Indexing failed.')
+      page.reload()
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setWorking(null)
+    }
+  }
+
+  const removeOrphan = async (id: string) => {
+    setWorking(id)
+    setActionError(null)
+    try {
+      await deleteOrphanAttachmentFile(id)
+      setConfirmDelete(null)
       page.reload()
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : String(cause))
@@ -50,8 +71,8 @@ export default function UploadsPage() {
     <div className="stack">
       <div className="page-head">
         <div>
-          <h1><Upload size={20} />Uploaded files</h1>
-          <p>Files uploaded for chat, their conversion and embedding status, and the resulting chunk count.</p>
+          <h1><Paperclip size={20} />Attachment files</h1>
+          <p>Files prepared for chat, their index status, and the conversation each file belongs to.</p>
         </div>
         <button onClick={page.reload}><RefreshCw size={14} />Refresh</button>
       </div>
@@ -59,7 +80,7 @@ export default function UploadsPage() {
       <div className="card"><div className="card-body">
         <input
           type="search"
-          aria-label="Filter uploads"
+          aria-label="Filter attachment files"
           placeholder="Filter by file name"
           value={search}
           onChange={(event) => { setSearch(event.target.value); setSkip(0) }}
@@ -75,7 +96,7 @@ export default function UploadsPage() {
           <>
             <div className="table-scroll">
               <table>
-                <thead><tr><th>File</th><th>Size</th><th>Status</th><th>Chunks</th><th>Uploaded</th><th>Indexed</th><th>Actions</th></tr></thead>
+                <thead><tr><th>File</th><th>Status</th><th>Conversation</th><th>Size</th><th>Chunks</th><th>Uploaded</th><th>Indexed</th><th>Actions</th></tr></thead>
                 <tbody>
                   {page.data.items.map((file) => (
                     <tr key={file.id}>
@@ -86,17 +107,42 @@ export default function UploadsPage() {
                         </span>
                         {file.errorMessage ? <div className="upload-error" title={file.errorMessage}>{file.errorMessage}</div> : null}
                       </td>
-                      <td>{formatBytes(file.sizeBytes)}</td>
                       <td><span className={`badge ${STATUS_CLASSES[file.status]}`}>{STATUS_LABELS[file.status]}</span></td>
+                      <td>
+                        {file.conversationId ? (
+                          <Link
+                            className="conversation-link"
+                            to={`/chat?conversation=${encodeURIComponent(file.conversationId)}${file.messageId ? `&message=${encodeURIComponent(file.messageId)}` : ''}`}
+                          >
+                            <MessageSquare size={13} />
+                            {file.conversationTitle ?? 'Open conversation'}
+                          </Link>
+                        ) : <span className="badge warning">Orphan</span>}
+                      </td>
+                      <td>{formatBytes(file.sizeBytes)}</td>
                       <td>{file.chunkCount.toLocaleString()}</td>
                       <td title={formatDateTime(file.createdAtUtc)}>{formatRelative(file.createdAtUtc)}</td>
                       <td title={formatDateTime(file.indexedAtUtc)}>{formatRelative(file.indexedAtUtc)}</td>
                       <td>
                         <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
-                          <a className="button-link" href={uploadDownloadUrl(file.id)}><Download size={13} />Download</a>
+                          <a className="button-link" href={attachmentFileDownloadUrl(file.id)}><Download size={13} />Download</a>
                           <button disabled={working === file.id} onClick={() => void reindex(file.id)}>
                             <RotateCw size={13} />{working === file.id ? 'Indexing…' : 'Reindex'}
                           </button>
+                          {file.isOrphan ? (
+                            confirmDelete === file.id ? (
+                              <>
+                                <button className="ghost icon-only" title="Cancel" onClick={() => setConfirmDelete(null)}><X size={13} /></button>
+                                <button className="danger" disabled={working === file.id} onClick={() => void removeOrphan(file.id)}>
+                                  <Trash2 size={13} />Confirm
+                                </button>
+                              </>
+                            ) : (
+                              <button className="danger" onClick={() => setConfirmDelete(file.id)}>
+                                <Trash2 size={13} />Delete orphan
+                              </button>
+                            )
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -107,7 +153,7 @@ export default function UploadsPage() {
             <Pagination skip={skip} top={25} total={page.data.totalCount} onSkip={setSkip} />
           </>
         ) : page.loading ? <Empty title="Loading…" /> : (
-          <Empty title="No uploads" icon={<SearchX size={26} strokeWidth={1.5} />} detail="Files attached in chat will appear here." />
+          <Empty title="No attachment files" icon={<SearchX size={26} strokeWidth={1.5} />} detail="Files attached in chat will appear here." />
         )}
       </div>
     </div>
