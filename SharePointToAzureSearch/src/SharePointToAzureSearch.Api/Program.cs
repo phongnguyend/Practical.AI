@@ -12,6 +12,7 @@ builder.Services.AddWebhookServices(builder.Configuration);
 builder.Services.AddSearchQueryServices(builder.Configuration);
 builder.Services.AddIndexStateServices(builder.Configuration);
 builder.Services.AddChatServices(builder.Configuration);
+builder.Services.AddUploadServices(builder.Configuration);
 
 // The viewer front end is served from its own origin during development. Origins are configured rather
 // than wildcarded, because these endpoints are unauthenticated and expose the whole index.
@@ -124,6 +125,67 @@ app.MapGet("/api/state/indexed-files/{driveId}/{itemId}", async (
 app.MapGet("/api/state/delta", (
     IIndexStateReader reader,
     CancellationToken cancellationToken) => reader.ListDeltaStateAsync(cancellationToken));
+
+app.MapPost("/api/uploads", async (
+    HttpRequest request,
+    UploadService uploads,
+    CancellationToken cancellationToken) =>
+{
+    if (!request.HasFormContentType)
+    {
+        return Results.BadRequest(new { error = "Upload one file as multipart/form-data." });
+    }
+    var form = await request.ReadFormAsync(cancellationToken);
+    var file = form.Files.GetFile("file");
+    if (file is null)
+    {
+        return Results.BadRequest(new { error = "A 'file' form part is required." });
+    }
+    try
+    {
+        await using var content = file.OpenReadStream();
+        var created = await uploads.CreateAsync(file.FileName, file.ContentType, file.Length, content, cancellationToken);
+        return Results.Created($"/api/uploads/{created.Id}", created);
+    }
+    catch (Exception ex) when (ex is UploadTooLargeException or ArgumentException)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapGet("/api/uploads", async (
+    UploadService uploads,
+    CancellationToken cancellationToken,
+    string? search = null,
+    int skip = 0,
+    int top = 25) =>
+{
+    if (skip < 0 || top is < 1 or > 200)
+    {
+        return Results.BadRequest(new { error = "'skip' must be non-negative and 'top' must be between 1 and 200." });
+    }
+    return Results.Ok(await uploads.ListAsync(search, skip, top, cancellationToken));
+});
+
+app.MapGet("/api/uploads/{id:guid}/download", async (
+    Guid id,
+    UploadService uploads,
+    CancellationToken cancellationToken) =>
+{
+    var file = await uploads.DownloadAsync(id, cancellationToken);
+    return file is null
+        ? Results.NotFound()
+        : Results.Stream(file.Content, file.ContentType, file.FileName, enableRangeProcessing: true);
+});
+
+app.MapPost("/api/uploads/{id:guid}/reindex", async (
+    Guid id,
+    UploadService uploads,
+    CancellationToken cancellationToken) =>
+{
+    var result = await uploads.ReindexAsync(id, cancellationToken);
+    return result is null ? Results.NotFound() : Results.Ok(result);
+});
 
 // Microsoft Graph webhook subscriptions. Unlike the endpoints above these change tenant state: removing
 // a subscription stops change notifications, leaving the drive to the scheduled synchronization alone.
@@ -353,6 +415,7 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
     IChatStore store,
     IAgentStore agentStore,
     ChatAgentService agent,
+    UploadService uploads,
     ILogger<Program> logger,
     HttpResponse response,
     CancellationToken cancellationToken) =>
@@ -360,6 +423,12 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
     if (string.IsNullOrWhiteSpace(body?.Content))
     {
         return Results.BadRequest(new { error = "A non-empty 'content' is required." });
+    }
+
+    var uploadIds = body.UploadIds?.Distinct().ToArray() ?? [];
+    if (uploadIds.Length > 10)
+    {
+        return Results.BadRequest(new { error = "At most 10 attachments can be sent with one message." });
     }
 
     var conversation = await store.GetConversationAsync(id, cancellationToken);
@@ -377,12 +446,21 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
     }
 
     var content = body.Content.Trim();
+    string attachmentContext;
+    try
+    {
+        attachmentContext = await uploads.GetAttachmentContextAsync(uploadIds, content, cancellationToken);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
     var history = await store.ListMessagesAsync(id, cancellationToken);
 
     // The question is stored before the model runs, so a failed or cancelled turn still leaves the
     // conversation showing what was asked.
     var question = await store.AppendMessageAsync(
-        id, ChatMessageRole.User, content, [], null, null, cancellationToken);
+        id, ChatMessageRole.User, content, [], null, null, uploadIds, cancellationToken);
 
     // A conversation created from the sidebar has no title until its first question supplies one.
     var renamed = conversation.Title;
@@ -425,6 +503,7 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
             conversation.UserId,
             selectedAgent.ModelId,
             selectedAgent.Instructions,
+            attachmentContext,
             (text, token) => WriteEventAsync(new ChatStreamEvent("delta", Text: text), token),
             (status, token) => WriteEventAsync(new ChatStreamEvent("status", Message: status), token),
             cancellationToken);
@@ -439,7 +518,7 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
     }
 
     var answer = await store.AppendMessageAsync(
-        id, ChatMessageRole.Assistant, turn.Text, turn.Citations, turn.Usage, turn.ModelId, cancellationToken);
+        id, ChatMessageRole.Assistant, turn.Text, turn.Citations, turn.Usage, turn.ModelId, [], cancellationToken);
     await WriteEventAsync(new ChatStreamEvent("completed", Answer: answer, Title: renamed), cancellationToken);
     return Results.Empty;
 });
@@ -591,7 +670,7 @@ public sealed record CreateSubscriptionRequest(string? Name, int? Days, string? 
 /// </summary>
 public sealed record NewConversation(string? Title, string? UserId, string? AgentId);
 
-public sealed record ChatTurnRequest(string? Content);
+public sealed record ChatTurnRequest(string? Content, IReadOnlyList<Guid>? UploadIds);
 
 public sealed record AgentDefinitionRequest(string? Name, string? ModelId, string? Instructions);
 

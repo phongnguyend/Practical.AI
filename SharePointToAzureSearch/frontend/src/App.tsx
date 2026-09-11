@@ -12,6 +12,7 @@ import {
   Sparkles,
   Sun,
   Webhook,
+  Upload,
 } from 'lucide-react'
 import OverviewPage from './pages/OverviewPage'
 import IndexedFilesPage from './pages/IndexedFilesPage'
@@ -21,6 +22,7 @@ import SubscriptionsPage from './pages/SubscriptionsPage'
 import ChatPage from './pages/ChatPage'
 import FeedbackPage from './pages/FeedbackPage'
 import AgentsPage from './pages/AgentsPage'
+import UploadsPage from './pages/UploadsPage'
 
 type Theme = 'system' | 'light' | 'dark'
 
@@ -85,6 +87,10 @@ export default function App() {
             <Scale size={16} />
             Feedback
           </NavLink>
+          <NavLink to="/uploads">
+            <Upload size={16} />
+            Uploads
+          </NavLink>
           <NavLink to="/agents">
             <Bot size={16} />
             Agents
@@ -105,6 +111,7 @@ export default function App() {
           <Route path="/" element={<Navigate to="/overview" replace />} />
           <Route path="/overview" element={<OverviewPage />} />
           <Route path="/files" element={<IndexedFilesPage />} />
+          <Route path="/uploads" element={<UploadsPage />} />
           <Route path="/delta" element={<DeltaStatePage />} />
           <Route path="/subscriptions" element={<SubscriptionsPage />} />
           <Route path="/search" element={<SearchPage />} />

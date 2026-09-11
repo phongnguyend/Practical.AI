@@ -52,8 +52,25 @@ public sealed class SearchOptions
     public bool UsedManagedIdentity { get; set; }
     [Required, Url] public string Endpoint { get; set; } = "";
     public string? ApiKey { get; set; }
-    [Required] public string IndexName { get; set; } = "sharepoint-files";
+    [Required] public string SharePointIndexName { get; set; } = "sharepoint-files";
+    [Required] public string UploadIndexName { get; set; } = "chat-uploads";
     [Range(1, 4096)] public int VectorDimensions { get; set; } = 1536;
+}
+
+public sealed class UploadOptions
+{
+    public const string SectionName = "Uploads";
+    public bool UsedManagedIdentity { get; set; }
+    public string? ConnectionString { get; set; }
+    public string? ServiceUri { get; set; }
+    [Required] public string ContainerName { get; set; } = "chat-uploads";
+    [Range(1024, 209_715_200)] public int MaxFileBytes { get; set; } = 20 * 1024 * 1024;
+    [Range(100, 8000)] public int ChunkSizeCharacters { get; set; } = 4000;
+    [Range(0, 2000)] public int ChunkOverlapCharacters { get; set; } = 400;
+
+    public bool IsConfigured => UsedManagedIdentity
+        ? Uri.TryCreate(ServiceUri, UriKind.Absolute, out _)
+        : !string.IsNullOrWhiteSpace(ConnectionString);
 }
 
 public sealed class OpenAiOptions

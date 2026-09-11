@@ -11,6 +11,8 @@ import {
   GitBranch,
   MessageSquare,
   Plus,
+  Paperclip,
+  Download,
   SendHorizontal,
   Sparkles,
   ThumbsDown,
@@ -28,8 +30,10 @@ import {
   listConversations,
   sendChatMessage,
   setMessageFeedback,
+  uploadFile,
+  uploadDownloadUrl,
 } from '../api/client'
-import type { ChatConversation, ChatFeedback, ChatMessage } from '../api/types'
+import type { ChatConversation, ChatFeedback, ChatMessage, ChatMessageAttachment } from '../api/types'
 import { Empty, ErrorBanner, Field, LoadingBar, Modal } from '../components/ui'
 import { FileTypeIcon } from '../components/FileTypeIcon'
 import {
@@ -60,7 +64,10 @@ export default function ChatPage() {
   const [showNewConversation, setShowNewConversation] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [creatingConversation, setCreatingConversation] = useState(false)
+  const [attachments, setAttachments] = useState<ChatMessageAttachment[]>([])
+  const [uploading, setUploading] = useState(false)
   const threadRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const list = conversations.data ?? []
   const active = list.find((item) => item.id === activeId) ?? null
@@ -106,6 +113,7 @@ export default function ChatPage() {
   // just left from overwriting the new one.
   useEffect(() => {
     setMessages([])
+    setAttachments([])
   }, [activeId])
 
   useEffect(() => {
@@ -214,6 +222,31 @@ export default function ChatPage() {
     }
   }
 
+  const addFiles = async (files: FileList | null) => {
+    if (!files?.length) return
+    setUploading(true)
+    setError(null)
+    try {
+      for (const file of Array.from(files).slice(0, Math.max(0, 10 - attachments.length))) {
+        const uploaded = await uploadFile(file)
+        if (uploaded.status !== 'Indexed') {
+          throw new Error(uploaded.errorMessage ?? `${uploaded.fileName} could not be indexed.`)
+        }
+        setAttachments((current) => [...current, {
+          id: uploaded.id,
+          fileName: uploaded.fileName,
+          contentType: uploaded.contentType,
+          sizeBytes: uploaded.sizeBytes,
+        }])
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   /**
    * The question is shown immediately with a local id and replaced by the stored one when the turn
    * returns, so the thread does not sit empty while the agent searches.
@@ -240,6 +273,7 @@ export default function ChatPage() {
       totalTokenCount: 0,
       modelId: null,
       feedback: null,
+      attachments,
       createdAtUtc: new Date().toISOString(),
     }
     setMessages((current) => [...current, pending])
@@ -252,7 +286,7 @@ export default function ChatPage() {
         open(created.id)
       }
 
-      const result = await sendChatMessage(conversationId, content, (event) => {
+      const result = await sendChatMessage(conversationId, content, attachments.map((file) => file.id), (event) => {
         if (event.type === 'started') {
           setMessages((current) => [
             ...current.filter((message) => message.id !== pending.id),
@@ -273,6 +307,7 @@ export default function ChatPage() {
         result.answer,
       ])
       conversations.reload()
+      setAttachments([])
     } catch (cause) {
       setMessages((current) => current.filter((message) => message.id !== pending.id))
       setDraft(content)
@@ -389,20 +424,57 @@ export default function ChatPage() {
           </div>
 
           <div className="chat-composer">
-            <textarea
-              rows={2}
-              placeholder="Ask about the indexed documents…   (Enter to send, Shift+Enter for a new line)"
-              value={draft}
-              disabled={sending}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault()
-                  void send()
-                }
-              }}
+            <input
+              ref={fileInputRef}
+              className="visually-hidden"
+              type="file"
+              multiple
+              onChange={(event) => void addFiles(event.target.files)}
             />
-            <button className="primary" disabled={sending || draft.trim() === ''} onClick={send}>
+            <button
+              className="chat-composer-action"
+              disabled={sending || uploading || attachments.length >= 10}
+              onClick={() => fileInputRef.current?.click()}
+              title="Attach files"
+            >
+              <Paperclip size={15} />
+              {uploading ? 'Uploading…' : 'Attach'}
+            </button>
+            <div className="chat-compose-main">
+              {attachments.length > 0 ? (
+                <div className="chat-attachment-list">
+                  {attachments.map((file) => (
+                    <span className="chat-attachment-chip" key={file.id}>
+                      <FileTypeIcon name={file.fileName} mimeType={file.contentType} size={14} />
+                      <span title={file.fileName}>{file.fileName}</span>
+                      <button
+                        className="ghost icon-only"
+                        aria-label={`Remove ${file.fileName}`}
+                        onClick={() => setAttachments((current) => current.filter((item) => item.id !== file.id))}
+                      ><X size={12} /></button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <textarea
+                rows={2}
+                placeholder="Ask about the indexed documents…   (Enter to send, Shift+Enter for a new line)"
+                value={draft}
+                disabled={sending}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault()
+                    void send()
+                  }
+                }}
+              />
+            </div>
+            <button
+              className="primary chat-composer-action"
+              disabled={sending || uploading || draft.trim() === ''}
+              onClick={send}
+            >
               <SendHorizontal size={15} />
               {sending ? 'Thinking…' : 'Send'}
             </button>
@@ -539,6 +611,17 @@ function MessageBubble({
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
           </div>
         )}
+        {message.attachments.length > 0 ? (
+          <div className="message-attachments">
+            {message.attachments.map((file) => (
+              <a href={uploadDownloadUrl(file.id)} key={file.id} title={`Download ${file.fileName}`}>
+                <FileTypeIcon name={file.fileName} mimeType={file.contentType} size={14} />
+                <span>{file.fileName}</span>
+                <Download size={12} />
+              </a>
+            ))}
+          </div>
+        ) : null}
         <div className="chat-meta">
           <span className="chat-time" title={formatDateTime(message.createdAtUtc)}>
             {formatMessageTime(message.createdAtUtc)}

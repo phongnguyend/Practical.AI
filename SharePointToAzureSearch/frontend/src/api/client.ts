@@ -18,6 +18,7 @@ import type {
   SubscriptionView,
   UpdateSubscriptionResult,
   TimedSearch,
+  UploadRecord,
 } from './types'
 
 /** Empty by default, so requests go to the dev server's /api proxy on this same origin. */
@@ -145,6 +146,7 @@ export function getThread(id: string, signal?: AbortSignal): Promise<ChatThread>
 export async function sendChatMessage(
   id: string,
   content: string,
+  uploadIds: string[],
   onEvent: (event: ChatStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<ChatTurnResult> {
@@ -158,7 +160,7 @@ export async function sendChatMessage(
           Accept: 'application/x-ndjson',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, uploadIds }),
         signal,
       },
     )
@@ -211,6 +213,27 @@ export async function sendChatMessage(
   }
 
   return { question, answer, title }
+}
+
+export async function uploadFile(file: File, signal?: AbortSignal): Promise<UploadRecord> {
+  const body = new FormData()
+  body.append('file', file)
+  return request<UploadRecord>('/api/uploads', { method: 'POST', body, signal })
+}
+
+export function listUploads(
+  options: { search?: string; skip?: number; top?: number },
+  signal?: AbortSignal,
+): Promise<PagedResult<UploadRecord>> {
+  return request<PagedResult<UploadRecord>>(`/api/uploads${query({ ...options })}`, { signal })
+}
+
+export function reindexUpload(id: string): Promise<UploadRecord> {
+  return request<UploadRecord>(`/api/uploads/${encodeURIComponent(id)}/reindex`, { method: 'POST' })
+}
+
+export function uploadDownloadUrl(id: string): string {
+  return `${BASE_URL}/api/uploads/${encodeURIComponent(id)}/download`
 }
 
 export function listAgents(signal?: AbortSignal): Promise<AgentDefinition[]> {

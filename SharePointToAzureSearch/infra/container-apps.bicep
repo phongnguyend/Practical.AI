@@ -21,6 +21,7 @@ var openAiAccountName = take(toLower('${namePrefix}-openai-${uniqueSuffix}'), 64
 var documentIntelligenceAccountName = take(toLower('${namePrefix}-docintel-${uniqueSuffix}'), 64)
 var containerRegistryName = 'cr${uniqueString(namePrefix, subscription().subscriptionId, resourceGroup().id)}'
 var containerAppsEnvironmentName = take(toLower('${namePrefix}-cae-${uniqueSuffix}'), 60)
+var storageAccountName = take(toLower(replace('${namePrefix}uploads${uniqueSuffix}', '-', '')), 24)
 var registryPullIdentityName = take(toLower('${namePrefix}-acr-pull-${uniqueSuffix}'), 128)
 var apiContainerAppName = take(toLower('${namePrefix}-api-${uniqueSuffix}'), 32)
 var workerContainerAppName = take(toLower('${namePrefix}-worker-${uniqueSuffix}'), 32)
@@ -33,6 +34,7 @@ var searchIndexDataContributorRoleId = '8ebe5a00-799e-43f5-93ac-243d3dce84a7'
 var searchServiceContributorRoleId = '7ca78c08-252a-4471-8644-bb5ff32d4ba0'
 var cognitiveServicesOpenAiUserRoleId = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
 var cognitiveServicesUserRoleId = 'a97b65f3-24c7-4388-baec-2e87135dc908'
+var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 
 resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
   name: containerRegistryName
@@ -52,6 +54,10 @@ resource searchService 'Microsoft.Search/searchServices@2025-05-01' existing = {
 
 resource openAiAccount 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = {
   name: openAiAccountName
+}
+
+resource uploadStorage 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
+  name: storageAccountName
 }
 
 resource documentIntelligenceAccount 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = if (deployDocumentIntelligence) {
@@ -114,6 +120,34 @@ resource apiContainerApp 'Microsoft.App/containerApps@2025-01-01' = {
             {
               name: 'ServiceBus__FullyQualifiedNamespace'
               value: '${serviceBusNamespace.name}.servicebus.windows.net'
+            }
+            {
+              name: 'Uploads__UsedManagedIdentity'
+              value: 'true'
+            }
+            {
+              name: 'Uploads__ServiceUri'
+              value: uploadStorage.properties.primaryEndpoints.blob
+            }
+            {
+              name: 'Uploads__ContainerName'
+              value: 'chat-uploads'
+            }
+            {
+              name: 'AzureSearch__UsedManagedIdentity'
+              value: 'true'
+            }
+            {
+              name: 'AzureSearch__Endpoint'
+              value: 'https://${searchService.name}.search.windows.net'
+            }
+            {
+              name: 'AzureOpenAI__UsedManagedIdentity'
+              value: 'true'
+            }
+            {
+              name: 'AzureOpenAI__Endpoint'
+              value: openAiAccount.properties.endpoint
             }
           ]
           resources: {
@@ -227,6 +261,46 @@ resource apiServiceBusSenderRole 'Microsoft.Authorization/roleAssignments@2022-0
     principalId: apiContainerApp.identity.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', serviceBusDataSenderRoleId)
+  }
+}
+
+resource apiUploadBlobRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(uploadStorage.id, apiContainerApp.id, storageBlobDataContributorRoleId)
+  scope: uploadStorage
+  properties: {
+    principalId: apiContainerApp.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
+  }
+}
+
+resource apiSearchIndexRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(searchService.id, apiContainerApp.id, searchIndexDataContributorRoleId)
+  scope: searchService
+  properties: {
+    principalId: apiContainerApp.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchIndexDataContributorRoleId)
+  }
+}
+
+resource apiSearchServiceRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(searchService.id, apiContainerApp.id, searchServiceContributorRoleId)
+  scope: searchService
+  properties: {
+    principalId: apiContainerApp.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchServiceContributorRoleId)
+  }
+}
+
+resource apiOpenAiRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(openAiAccount.id, apiContainerApp.id, cognitiveServicesOpenAiUserRoleId)
+  scope: openAiAccount
+  properties: {
+    principalId: apiContainerApp.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', cognitiveServicesOpenAiUserRoleId)
   }
 }
 

@@ -106,4 +106,31 @@ public sealed class ChatMessageEntity
     public DateTimeOffset CreatedAtUtc { get; set; }
 
     public ChatConversationEntity? Conversation { get; set; }
+    public ICollection<ChatMessageAttachmentEntity> Attachments { get; set; } = [];
+}
+
+public sealed class UploadEntity
+{
+    public Guid Id { get; set; }
+    public string FileName { get; set; } = "";
+    public string BlobName { get; set; } = "";
+    public string? ContentType { get; set; }
+    public long SizeBytes { get; set; }
+    public UploadIndexStatus Status { get; set; }
+    public int ChunkCount { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+    public DateTimeOffset? IndexedAtUtc { get; set; }
+    public ICollection<ChatMessageAttachmentEntity> MessageAttachments { get; set; } = [];
+}
+
+public sealed class ChatMessageAttachmentEntity
+{
+    public Guid Id { get; set; }
+    public Guid MessageId { get; set; }
+    public Guid UploadId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public ChatMessageEntity? Message { get; set; }
+    public UploadEntity? Upload { get; set; }
 }

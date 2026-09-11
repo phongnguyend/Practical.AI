@@ -20,6 +20,8 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
     public DbSet<IndexedFileEntity> IndexedFiles => Set<IndexedFileEntity>();
     public DbSet<ChatConversationEntity> ChatConversations => Set<ChatConversationEntity>();
     public DbSet<ChatMessageEntity> ChatMessages => Set<ChatMessageEntity>();
+    public DbSet<UploadEntity> Uploads => Set<UploadEntity>();
+    public DbSet<ChatMessageAttachmentEntity> ChatMessageAttachments => Set<ChatMessageAttachmentEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -125,6 +127,36 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
 
             // The feedback review page reads only rated messages, newest first.
             entity.HasIndex(x => x.Feedback).HasFilter("[Feedback] IS NOT NULL");
+        });
+
+        modelBuilder.Entity<UploadEntity>(entity =>
+        {
+            entity.ToTable("Uploads");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasDefaultValueSql("NEWSEQUENTIALID()").ValueGeneratedOnAdd();
+            entity.Property(x => x.FileName).HasMaxLength(400).IsRequired();
+            entity.Property(x => x.BlobName).HasMaxLength(800).IsRequired();
+            entity.Property(x => x.ContentType).HasMaxLength(200);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+            entity.Property(x => x.ErrorMessage).HasMaxLength(4000);
+            entity.Property(x => x.CreatedAtUtc).HasPrecision(7);
+            entity.Property(x => x.UpdatedAtUtc).HasPrecision(7);
+            entity.Property(x => x.IndexedAtUtc).HasPrecision(7);
+            entity.HasIndex(x => x.CreatedAtUtc).IsDescending();
+            entity.HasIndex(x => x.Status);
+        });
+
+        modelBuilder.Entity<ChatMessageAttachmentEntity>(entity =>
+        {
+            entity.ToTable("ChatMessageAttachments");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasDefaultValueSql("NEWSEQUENTIALID()").ValueGeneratedOnAdd();
+            entity.Property(x => x.CreatedAtUtc).HasPrecision(7);
+            entity.HasIndex(x => new { x.MessageId, x.UploadId }).IsUnique();
+            entity.HasOne(x => x.Message).WithMany(x => x.Attachments)
+                .HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Upload).WithMany(x => x.MessageAttachments)
+                .HasForeignKey(x => x.UploadId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

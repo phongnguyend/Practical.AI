@@ -54,7 +54,10 @@ public sealed record ChatMessageRecord(
     long TotalTokenCount,
     string? ModelId,
     ChatFeedback? Feedback,
+    IReadOnlyList<ChatMessageAttachment> Attachments,
     DateTimeOffset CreatedAtUtc);
+
+public sealed record ChatMessageAttachment(Guid Id, string FileName, string? ContentType, long SizeBytes);
 
 /// <summary>
 /// One rated answer, with the question that prompted it and the conversation it came from — the three
@@ -111,6 +114,7 @@ public interface IChatStore
         IReadOnlyList<ChatCitation> citations,
         ChatTokenUsage? usage,
         string? modelId,
+        IReadOnlyCollection<Guid> uploadIds,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -218,6 +222,7 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
 
         var sourceMessages = await context.ChatMessages
             .AsNoTracking()
+            .Include(m => m.Attachments)
             .Where(m => m.ConversationId == conversationId && m.Sequence <= throughSequence.Value)
             .OrderBy(m => m.Sequence)
             .ToListAsync(cancellationToken);
@@ -253,6 +258,11 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
             ModelId = message.ModelId,
             Feedback = null,
             CreatedAtUtc = message.CreatedAtUtc,
+            Attachments = [.. message.Attachments.Select(attachment => new ChatMessageAttachmentEntity
+            {
+                UploadId = attachment.UploadId,
+                CreatedAtUtc = now,
+            })],
         }));
         await context.SaveChangesAsync(cancellationToken);
 
@@ -291,6 +301,8 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
         var rows = await context.ChatMessages
             .AsNoTracking()
+            .Include(m => m.Attachments)
+            .ThenInclude(a => a.Upload)
             .Where(m => m.ConversationId == conversationId)
             .OrderBy(m => m.Sequence)
             .ToListAsync(cancellationToken);
@@ -304,6 +316,7 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
         IReadOnlyList<ChatCitation> citations,
         ChatTokenUsage? usage,
         string? modelId,
+        IReadOnlyCollection<Guid> uploadIds,
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
@@ -334,11 +347,28 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
             CreatedAtUtc = now
         };
         context.ChatMessages.Add(entity);
+
+        var distinctUploadIds = uploadIds.Distinct().ToArray();
+        var attachedUploads = distinctUploadIds.Length == 0
+            ? []
+            : await context.Uploads.AsNoTracking()
+                .Where(x => distinctUploadIds.Contains(x.Id))
+                .ToListAsync(cancellationToken);
+        if (attachedUploads.Count != distinctUploadIds.Length)
+        {
+            throw new InvalidOperationException("One or more attachment IDs do not exist.");
+        }
+        entity.Attachments = [.. attachedUploads.Select(upload => new ChatMessageAttachmentEntity
+        {
+            UploadId = upload.Id,
+            CreatedAtUtc = now,
+        })];
         await context.SaveChangesAsync(cancellationToken);
 
         var record = new ChatMessageRecord(
             entity.Id, conversationId, role, content, citations,
-            inputTokens, outputTokens, totalTokens, modelId, null, now);
+            inputTokens, outputTokens, totalTokens, modelId, null,
+            [.. attachedUploads.Select(ToAttachment)], now);
 
         // The conversation list is ordered by this, so it moves to the top on every turn.
         await context.ChatConversations
@@ -448,7 +478,11 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
         row.TotalTokenCount,
         row.ModelId,
         row.Feedback,
+        [.. row.Attachments.Where(x => x.Upload is not null).Select(x => ToAttachment(x.Upload!))],
         row.CreatedAtUtc);
+
+    private static ChatMessageAttachment ToAttachment(UploadEntity row) =>
+        new(row.Id, row.FileName, row.ContentType, row.SizeBytes);
 
     private static IReadOnlyList<ChatCitation> ReadCitations(string? json) =>
         json is null ? [] : JsonSerializer.Deserialize<List<ChatCitation>>(json, Json) ?? [];

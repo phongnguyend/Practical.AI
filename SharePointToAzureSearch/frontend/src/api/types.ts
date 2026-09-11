@@ -117,7 +117,30 @@ export interface ChatMessage {
   modelId: string | null
   /** What the reader thought of the answer, null until they say. */
   feedback: ChatFeedback | null
+  attachments: ChatMessageAttachment[]
   createdAtUtc: string
+}
+
+export interface ChatMessageAttachment {
+  id: string
+  fileName: string
+  contentType: string | null
+  sizeBytes: number
+}
+
+export type UploadIndexStatus = 'NotStarted' | 'Indexing' | 'Indexed' | 'Failed'
+
+export interface UploadRecord {
+  id: string
+  fileName: string
+  contentType: string | null
+  sizeBytes: number
+  status: UploadIndexStatus
+  chunkCount: number
+  errorMessage: string | null
+  createdAtUtc: string
+  updatedAtUtc: string
+  indexedAtUtc: string | null
 }
 
 /** One rated answer, with the question that prompted it. */

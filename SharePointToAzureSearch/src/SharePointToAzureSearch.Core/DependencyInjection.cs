@@ -5,6 +5,7 @@ using Azure.Identity;
 using Azure.Messaging.ServiceBus;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
+using Azure.Storage.Blobs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
@@ -76,6 +77,41 @@ public static class DependencyInjection
         // container, so the provider is a singleton and nothing else may own its lifetime.
         services.AddSingleton<OfficeCliToolProvider>();
         services.AddSingleton<ChatAgentService>();
+        return services;
+    }
+
+    public static IServiceCollection AddUploadServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        AddDatabase(services, configuration);
+        AddSearchOptions(services, configuration);
+        AddOpenAiOptions(services, configuration);
+        AddEmbeddingGenerator(services);
+        services.AddOptions<UploadOptions>().Bind(configuration.GetSection(UploadOptions.SectionName))
+            .ValidateDataAnnotations()
+            .Validate(o => o.IsConfigured, "Uploads:ServiceUri is required with managed identity; otherwise Uploads:ConnectionString is required.")
+            .Validate(o => o.ChunkOverlapCharacters < o.ChunkSizeCharacters, "Uploads chunk overlap must be smaller than chunk size.")
+            .ValidateOnStart();
+        services.AddOptions<MarkItDownOptions>().Bind(configuration.GetSection(MarkItDownOptions.SectionName))
+            .ValidateDataAnnotations()
+            .Validate(o => o.IsConfigured, "MarkItDown:Endpoint is required to index uploaded chat attachments.")
+            .ValidateOnStart();
+        services.AddHttpClient<MarkItDownClient>((sp, client) =>
+            client.Timeout = TimeSpan.FromSeconds(sp.GetRequiredService<IOptions<MarkItDownOptions>>().Value.TimeoutSeconds));
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<UploadOptions>>().Value;
+            return options.UsedManagedIdentity
+                ? new BlobServiceClient(new Uri(options.ServiceUri!), CreateManagedIdentityCredential())
+                : new BlobServiceClient(options.ConnectionString!);
+        });
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<SearchOptions>>().Value;
+            return options.UsedManagedIdentity
+                ? new SearchIndexClient(new Uri(options.Endpoint), CreateManagedIdentityCredential())
+                : new SearchIndexClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey!));
+        });
+        services.AddSingleton<UploadService>();
         return services;
     }
 
@@ -244,8 +280,8 @@ public static class DependencyInjection
         {
             var options = sp.GetRequiredService<IOptions<SearchOptions>>().Value;
             return options.UsedManagedIdentity
-                ? new SearchClient(new Uri(options.Endpoint), options.IndexName, CreateManagedIdentityCredential())
-                : new SearchClient(new Uri(options.Endpoint), options.IndexName, new AzureKeyCredential(options.ApiKey!));
+                ? new SearchClient(new Uri(options.Endpoint), options.SharePointIndexName, CreateManagedIdentityCredential())
+                : new SearchClient(new Uri(options.Endpoint), options.SharePointIndexName, new AzureKeyCredential(options.ApiKey!));
         });
     }
 

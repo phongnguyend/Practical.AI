@@ -10,9 +10,10 @@ against the search index, side by side.
 | --- | --- |
 | **Overview** | Totals over the indexed-file table: files, chunks, source size, drives, files outside the current reconciliation round, and how many distinct index fingerprints are in play. Plus files by content type, the most recently indexed files, and the delta checkpoints. |
 | **Indexed files** | The `SharePointIndexedFiles` table, filterable and sortable, with a detail panel showing every recorded column — ETag, CTag, permissions hash, index fingerprint, scan ID, and the drive and item IDs. |
+| **Uploads** | Chat attachments with conversion/index status, chunk counts, errors, download, and reindex actions. |
 | **Delta state** | The `SharePointDeltaState` table, one card per drive: the scan ID, whether that round's orphan sweep has run, when the checkpoint was last written, and the delta link itself. |
 | **Subscriptions** | The Microsoft Graph webhook subscriptions on the application registration. Shows what the worker would create, whether automatic renewal is on, and for each subscription whether its resource, notification URL, and client state match this deployment. Create, edit, renew, and delete from a dialog; deleting takes two clicks. The one on the configured `SharePoint:NotificationUrl` is marked **Default** — its URL is read-only and it cannot be deleted, because the renewal service owns it. Any other subscription can be edited freely as long as its notification URL is not already taken. |
-| **Chat** | Conversations with an agent that searches the index when a question needs it. New chat, delete, and a thread with Markdown answers and a collapsible list of the documents each answer came from. Conversations name themselves from the first question and are stored in SQL Server, so they survive a restart. |
+| **Chat** | Conversations with an agent that searches the index when a question needs it. Attach up to ten files, create or delete chats, and read Markdown answers with a collapsible list of sources. Conversations name themselves from the first question and are stored in SQL Server, so they survive a restart. |
 | **Feedback** | Every answer someone rated in the chat: the question, the answer, its sources, and a link that opens that conversation. Filter by rating or by text; tiles show how many were liked, disliked, and the liked share. The link jumps straight to that answer in the thread and highlights it, which matters once a conversation is long. |
 | **Search** | Full-text, vector, and hybrid over the same request body. **Compare all three** issues them together and reports each one's round trip, plus how much the three agree — distinct chunks returned, how many every strategy found, and how many only one strategy found. |
 
@@ -72,6 +73,7 @@ The Chat page uses, and these **write to the database and call Azure OpenAI**:
 - `GET|POST /api/chat/conversations`, `DELETE /api/chat/conversations/{id}`
 - `GET|POST /api/chat/conversations/{id}/messages`
 - `POST /api/chat/messages/{id}/feedback` and `GET /api/chat/feedback`
+- `POST|GET /api/uploads`, `GET /api/uploads/{id}/download`, and `POST /api/uploads/{id}/reindex`
 
 The Subscriptions page additionally uses, and these **change tenant state**:
 

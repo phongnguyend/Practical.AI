@@ -918,6 +918,37 @@ button.ghost:hover:not(:disabled) {
   margin-top: 2px;
 }
 
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.button-link:hover {
+  background: var(--surface-2);
+  text-decoration: none;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
 .chat-conversation-meta-line,
 .chat-conversation-token-usage {
   display: block;
@@ -1271,8 +1302,81 @@ button.ghost:hover:not(:disabled) {
 
 .chat-composer textarea {
   flex: 1;
-  min-height: 46px;
+  min-height: 58px;
   max-height: 180px;
+}
+
+.chat-composer-action {
+  align-self: flex-end;
+  height: 58px;
+  padding-inline: 16px;
+}
+
+.chat-compose-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-attachment-list,
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-attachment-chip,
+.message-attachments a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 280px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.chat-attachment-chip > span,
+.message-attachments a > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-attachment-chip button {
+  margin: -4px -5px -4px 0;
+}
+
+.message-attachments {
+  margin-top: 8px;
+}
+
+/* User messages are right-aligned, but this row is a flex container and therefore does not inherit
+   text-align. Push its file chips to the same edge as the user's message bubble and timestamp. */
+.chat-message.user .message-attachments {
+  justify-content: flex-end;
+}
+
+.message-attachments a:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.upload-error {
+  max-width: 440px;
+  margin-top: 4px;
+  color: var(--critical);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Agent instruction cards keep long prompts scannable; the full text is available in View/Edit. */

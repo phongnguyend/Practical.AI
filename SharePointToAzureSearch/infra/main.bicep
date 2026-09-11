@@ -65,6 +65,7 @@ var documentIntelligenceAccountName = take(toLower('${namePrefix}-docintel-${uni
 var containerRegistryName = 'cr${uniqueString(namePrefix, subscription().subscriptionId, resourceGroup().id)}'
 var logAnalyticsWorkspaceName = take(toLower('${namePrefix}-logs-${uniqueSuffix}'), 63)
 var containerAppsEnvironmentName = take(toLower('${namePrefix}-cae-${uniqueSuffix}'), 60)
+var storageAccountName = take(toLower(replace('${namePrefix}uploads${uniqueSuffix}', '-', '')), 24)
 
 resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: containerRegistryName
@@ -109,6 +110,31 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2025-01-01'
       }
     }
   }
+}
+
+resource uploadStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: storageAccountName
+  location: location
+  tags: tags
+  kind: 'StorageV2'
+  sku: { name: 'Standard_LRS' }
+  properties: {
+    allowBlobPublicAccess: false
+    allowSharedKeyAccess: true
+    minimumTlsVersion: 'TLS1_2'
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+resource uploadBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  parent: uploadStorage
+  name: 'default'
+}
+
+resource uploadContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: uploadBlobService
+  name: 'chat-uploads'
+  properties: { publicAccess: 'None' }
 }
 
 resource serviceBusNamespace 'Microsoft.ServiceBus/namespaces@2024-01-01' = {
@@ -254,3 +280,5 @@ output documentIntelligenceEndpoint string = documentIntelligenceAccount.?proper
 output containerRegistryName string = containerRegistry.name
 output containerRegistryLoginServer string = containerRegistry.properties.loginServer
 output containerAppsEnvironmentName string = containerAppsEnvironment.name
+output uploadStorageServiceUri string = uploadStorage.properties.primaryEndpoints.blob
+output uploadContainerName string = uploadContainer.name

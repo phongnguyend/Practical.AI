@@ -18,13 +18,14 @@ Create these resources before deploying:
 1. An Azure Service Bus namespace with the configured topic and subscription.
 2. A SQL Server database reachable at `SqlServer:ConnectionString`, holding the worker's delta checkpoint and indexed-file metadata. Azure SQL Database, SQL Server, or SQL Server in a container all work; the schema is applied by an Entity Framework Core migration as the application starts.
 3. Azure AI Search and an Azure OpenAI embedding deployment. The search index is created or updated automatically.
-4. A MarkItDown service reachable at `MarkItDown:Endpoint`, which converts DOCX, PPTX, and XLSX to markdown. Plain-text formats are read in-process and need no service.
-5. Azure AI Document Intelligence, unless the allow list stays within the formats above. Every other format — PDF and images, for example — needs Document Intelligence, or it is indexed using metadata text only.
-6. An Entra application or managed identity with Microsoft Graph application access to the target site/drive. Prefer `Sites.Selected` with an explicit grant to the site; `Sites.Read.All` is the broader alternative. Admin consent is required. Read access covers everything but the chat assistant's [`upload_file`](#uploading-a-file-back) tool, which needs a `write` grant (or `Sites.ReadWrite.All`) — grant it only if the assistant should be able to replace documents.
-7. A public HTTPS URL for the API. Microsoft Graph must be able to call it during subscription creation. Not needed when `SharePoint:SubscriptionRenewalEnabled` is `false` and the worker polls on its schedule alone.
-8. `@officecli/officecli` on the API's host, only for the chat assistant's editing tools. See [Editing a file with officecli](#editing-a-file-with-officecli); set `OfficeCli:Enabled` to `false` where it is not installed.
+4. Azure Blob Storage for chat attachments. The Bicep templates create a private `chat-uploads` container.
+5. A MarkItDown service reachable at `MarkItDown:Endpoint`, which converts SharePoint Office files and all chat attachments to markdown.
+6. Azure AI Document Intelligence, unless the SharePoint allow list stays within the formats MarkItDown handles directly. Every other SharePoint format — PDF and images, for example — needs Document Intelligence, or it is indexed using metadata text only.
+7. An Entra application or managed identity with Microsoft Graph application access to the target site/drive. Prefer `Sites.Selected` with an explicit grant to the site; `Sites.Read.All` is the broader alternative. Admin consent is required. Read access covers everything but the chat assistant's [`upload_file`](#uploading-a-file-back) tool, which needs a `write` grant (or `Sites.ReadWrite.All`) — grant it only if the assistant should be able to replace documents.
+8. A public HTTPS URL for the API. Microsoft Graph must be able to call it during subscription creation. Not needed when `SharePoint:SubscriptionRenewalEnabled` is `false` and the worker polls on its schedule alone.
+9. `@officecli/officecli` on the API's host, only for the chat assistant's editing tools. See [Editing a file with officecli](#editing-a-file-with-officecli); set `OfficeCli:Enabled` to `false` where it is not installed.
 
-Assign Azure RBAC appropriate to each process: Service Bus Data Sender to the API; Service Bus Data Receiver, Search Index Data Contributor, Search Service Contributor, and Cognitive Services OpenAI User to the worker. Add Cognitive Services User when Document Intelligence is enabled. SQL Server permissions are granted inside the database rather than through RBAC: see [Worker state in SQL Server](#worker-state-in-sql-server).
+Assign Azure RBAC appropriate to each process: Service Bus Data Sender, Storage Blob Data Contributor, Search Index Data Contributor, Search Service Contributor, and Cognitive Services OpenAI User to the API; Service Bus Data Receiver, Search Index Data Contributor, Search Service Contributor, and Cognitive Services OpenAI User to the worker. Add Cognitive Services User when Document Intelligence is enabled. The Bicep templates create these assignments. SQL Server permissions are granted inside the database rather than through RBAC: see [Worker state in SQL Server](#worker-state-in-sql-server).
 
 Neither the SQL Server nor the MarkItDown service is deployed by the Bicep templates. Provision the database separately and pass its connection string to the worker as a secret.
 
@@ -41,7 +42,7 @@ $apiImageRepository = 'sharepoint-api'
 $workerImageRepository = 'sharepoint-worker'
 $serviceBusTopicName = 'sharepoint-changes'
 $serviceBusSubscriptionName = 'search-indexer'
-$searchIndexName = 'sharepoint-files'
+$sharePointIndexName = 'sharepoint-files'
 $vectorDimensions = 1536
 $embeddingDeploymentName = 'text-embedding-3-small'
 
@@ -125,7 +126,7 @@ az containerapp update `
   --set-env-vars `
     "ServiceBus__TopicName=$serviceBusTopicName" `
     "ServiceBus__SubscriptionName=$serviceBusSubscriptionName" `
-    "AzureSearch__IndexName=$searchIndexName" `
+    "AzureSearch__SharePointIndexName=$sharePointIndexName" `
     "AzureSearch__VectorDimensions=$vectorDimensions" `
     "AzureOpenAI__EmbeddingDeployment=$embeddingDeploymentName" `
   --cpu $workerCpu `
@@ -162,11 +163,17 @@ SqlServer__AutoMigrate
 AzureSearch__UsedManagedIdentity
 AzureSearch__Endpoint
 AzureSearch__ApiKey
+AzureSearch__SharePointIndexName
+AzureSearch__UploadIndexName
 AzureOpenAI__UsedManagedIdentity
 AzureOpenAI__Endpoint
 AzureOpenAI__EmbeddingDeployment
 DocumentIntelligence__UsedManagedIdentity
 MarkItDown__Endpoint
+Uploads__UsedManagedIdentity
+Uploads__ConnectionString
+Uploads__ServiceUri
+Uploads__ContainerName
 Downloads__Directory
 OfficeCli__Enabled
 OfficeCli__Command
@@ -192,7 +199,7 @@ dotnet run --project src/SharePointToAzureSearch.Background
 
 ## Search index schema
 
-The worker owns the index definition and applies it with `CreateOrUpdateIndex`, so `AzureSearch:IndexName` is created if missing and updated in place otherwise. Both the change signal listener and the scheduled synchronization do this as they start, so the index is prepared whichever trigger is enabled — a worker with both disabled indexes nothing and expects the index to exist already.
+The worker owns the index definition and applies it with `CreateOrUpdateIndex`, so `AzureSearch:SharePointIndexName` is created if missing and updated in place otherwise. Both the change signal listener and the scheduled synchronization do this as they start, so the index is prepared whichever trigger is enabled — a worker with both disabled indexes nothing and expects the index to exist already.
 
 One document is one chunk of one file: a file indexed as three chunks becomes three documents that share `driveId`, `itemId`, and the same file and permission metadata.
 
@@ -221,7 +228,7 @@ Every field is retrievable, and the file-level fields are copied onto each chunk
 
 `allowedPrincipals` holds prefixed tokens rather than raw IDs — `user:<id>`, `group:<id>`, `siteGroup:<id>`, `siteUser:<id>`, `application:<id>`, `email:<address>` (lowercased), and `anonymous` for anonymously shared files. Query-time principals are built in the same shape, so they compare directly in a filter. See [Permission-aware queries](#permission-aware-queries).
 
-Azure AI Search rejects breaking field changes on an existing index, including a change to a vector field's dimensions. Changing `AzureSearch:VectorDimensions` — or the embedding model behind it — therefore means pointing `AzureSearch:IndexName` at a new index and re-indexing from scratch rather than editing the live one.
+Azure AI Search rejects breaking field changes on an existing index, including a change to a vector field's dimensions. Changing `AzureSearch:VectorDimensions` — or the embedding model behind it — therefore means pointing `AzureSearch:SharePointIndexName` at a new index and re-indexing from scratch rather than editing the live one.
 
 ## Worker state in SQL Server
 
@@ -412,6 +419,8 @@ Microsoft Graph cannot `PATCH` a subscription's notification URL, so `PUT` appli
 An agent built with the [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/) (`Microsoft.Agents.AI.OpenAI`) answers questions about the indexed library. It runs on `AzureOpenAI:ChatDeployment` — `gpt-5-mini` by default, on the same resource and endpoint as the embedding deployment — and is given four tools of its own: `search_documents`, a hybrid search over this solution's index, `download_file`, which copies one of the files that search returned onto the local file system, `refresh_file`, which takes that file again as SharePoint holds it now, and `upload_file`, which sends the local copy back over the document. When [officecli](#editing-a-file-with-officecli) is configured its tools are added to those, which is what lets the assistant read a whole document or edit one. Its instructions tell it to search before answering anything about document content and to say so plainly when the index does not cover the question, rather than answering from the model's own knowledge.
 
 Conversations and messages are stored in the same SQL Server database, in `ChatConversations` and `ChatMessages`, which the same migration creates as the worker's tables. Deleting a conversation cascades to its messages through the foreign key. Each turn replays the stored history — the last 40 messages — so the agent needs no state of its own between requests, and the documents the tool retrieved are saved with the answer as citations.
+
+The chat composer also accepts up to ten attachments per message. An attachment is first stored in the configured Azure Blob container and recorded in `Uploads`, then converted to Markdown, chunked, embedded, and written to the separate `AzureSearch:UploadIndexName` index. Only successfully indexed upload IDs are sent with a chat turn. `ChatMessageAttachments` joins those IDs to the stored user message, while the model receives the most relevant indexed excerpts. The Uploads page shows `NotStarted`, `Indexing`, `Indexed`, and `Failed` states and supports download and reindex actions. Failed files remain in Blob Storage and SQL so they can be retried after fixing the converter or service configuration.
 
 | Endpoint | Effect |
 | --- | --- |

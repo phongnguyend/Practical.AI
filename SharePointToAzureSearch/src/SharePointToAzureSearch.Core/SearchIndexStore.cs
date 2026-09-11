@@ -53,7 +53,7 @@ public sealed class AzureSearchIndexStore(
             new SimpleField("permissionRoles", SearchFieldDataType.Collection(SearchFieldDataType.String)) { IsFilterable = true },
             new SimpleField("hasAnonymousAccess", SearchFieldDataType.Boolean) { IsFilterable = true }
         };
-        var index = new SearchIndex(_options.IndexName, fields)
+        var index = new SearchIndex(_options.SharePointIndexName, fields)
         {
             VectorSearch = new VectorSearch
             {
