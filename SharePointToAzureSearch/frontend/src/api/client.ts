@@ -121,6 +121,16 @@ export function createConversation(options?: {
   })
 }
 
+export function branchConversation(
+  conversationId: string,
+  messageId: string,
+): Promise<ChatConversation> {
+  return request<ChatConversation>(
+    `/api/chat/conversations/${encodeURIComponent(conversationId)}/branch/${encodeURIComponent(messageId)}`,
+    { method: 'POST' },
+  )
+}
+
 export function deleteConversation(id: string): Promise<{ deleted: string }> {
   return request<{ deleted: string }>(`/api/chat/conversations/${encodeURIComponent(id)}`, {
     method: 'DELETE',
@@ -211,27 +221,36 @@ export function getAgent(id: string, signal?: AbortSignal): Promise<AgentDefinit
   return request<AgentDefinition>(`/api/agents/${encodeURIComponent(id)}`, { signal })
 }
 
-export function getDefaultAgentInstructions(signal?: AbortSignal): Promise<{ instructions: string }> {
-  return request<{ instructions: string }>('/api/agents/default-instructions', { signal })
+export function getDefaultAgentInstructions(
+  signal?: AbortSignal,
+): Promise<{ instructions: string; modelId: string }> {
+  return request<{ instructions: string; modelId: string }>('/api/agents/default-instructions', {
+    signal,
+  })
 }
 
-export function createAgent(name: string, instructions?: string): Promise<AgentDefinition> {
+export function createAgent(
+  name: string,
+  modelId: string,
+  instructions?: string,
+): Promise<AgentDefinition> {
   return request<AgentDefinition>('/api/agents', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, instructions: instructions?.trim() || null }),
+    body: JSON.stringify({ name, modelId, instructions: instructions?.trim() || null }),
   })
 }
 
 export function updateAgent(
   id: string,
   name: string,
+  modelId: string,
   instructions: string,
 ): Promise<AgentDefinition> {
   return request<AgentDefinition>(`/api/agents/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, instructions }),
+    body: JSON.stringify({ name, modelId, instructions }),
   })
 }
 

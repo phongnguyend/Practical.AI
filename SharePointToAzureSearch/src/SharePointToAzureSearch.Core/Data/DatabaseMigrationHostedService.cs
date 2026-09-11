@@ -2,6 +2,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace SharePointToAzureSearch.Core.Data;
 
@@ -16,8 +17,11 @@ namespace SharePointToAzureSearch.Core.Data;
 /// </summary>
 public sealed class DatabaseMigrationHostedService(
     IDbContextFactory<SharePointIndexDbContext> contextFactory,
+    IOptions<OpenAiOptions> openAiOptions,
     ILogger<DatabaseMigrationHostedService> logger) : IHostedService
 {
+    private readonly string _defaultModelId = openAiOptions.Value.ChatDeployment;
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -33,10 +37,28 @@ public sealed class DatabaseMigrationHostedService(
             await context.Database.MigrateAsync(cancellationToken);
         }
 
+        await BackfillAgentModelIdsAsync(context, cancellationToken);
         await SeedDefaultAgentAsync(context, cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    private async Task BackfillAgentModelIdsAsync(
+        SharePointIndexDbContext context,
+        CancellationToken cancellationToken)
+    {
+        var updated = await context.AgentDefinitions
+            .Where(agent => agent.ModelId == null || agent.ModelId == "")
+            .ExecuteUpdateAsync(
+                update => update.SetProperty(agent => agent.ModelId, _defaultModelId),
+                cancellationToken);
+        if (updated > 0)
+        {
+            logger.LogInformation(
+                "Assigned the configured default model to {Count} existing agent(s).",
+                updated);
+        }
+    }
 
     private async Task SeedDefaultAgentAsync(
         SharePointIndexDbContext context,
@@ -52,6 +74,7 @@ public sealed class DatabaseMigrationHostedService(
         context.AgentDefinitions.Add(new AgentDefinitionEntity
         {
             Name = AgentDefaults.Name,
+            ModelId = _defaultModelId,
             Instructions = ChatAgentService.GetDefaultInstructions(),
             CreatedAtUtc = now,
             UpdatedAtUtc = now,

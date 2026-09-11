@@ -52,6 +52,7 @@ public sealed record ChatMessageRecord(
     long InputTokenCount,
     long OutputTokenCount,
     long TotalTokenCount,
+    string? ModelId,
     ChatFeedback? Feedback,
     DateTimeOffset CreatedAtUtc);
 
@@ -70,6 +71,7 @@ public sealed record FeedbackEntry(
     long InputTokenCount,
     long OutputTokenCount,
     long TotalTokenCount,
+    string? ModelId,
     DateTimeOffset CreatedAtUtc);
 
 /// <summary>
@@ -92,6 +94,10 @@ public interface IChatStore
         string? userId,
         Guid agentId,
         CancellationToken cancellationToken);
+    Task<ChatConversation?> BranchConversationAsync(
+        Guid conversationId,
+        Guid throughMessageId,
+        CancellationToken cancellationToken);
     Task RenameConversationAsync(Guid id, string title, CancellationToken cancellationToken);
 
     /// <summary>Removes a conversation and every message in it. Returns false when it was already gone.</summary>
@@ -104,6 +110,7 @@ public interface IChatStore
         string content,
         IReadOnlyList<ChatCitation> citations,
         ChatTokenUsage? usage,
+        string? modelId,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -185,6 +192,83 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
         return conversation;
     }
 
+    public async Task<ChatConversation?> BranchConversationAsync(
+        Guid conversationId,
+        Guid throughMessageId,
+        CancellationToken cancellationToken)
+    {
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var source = await context.ChatConversations
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
+        if (source is null)
+        {
+            return null;
+        }
+
+        var throughSequence = await context.ChatMessages
+            .AsNoTracking()
+            .Where(m => m.Id == throughMessageId && m.ConversationId == conversationId)
+            .Select(m => (int?)m.Sequence)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (throughSequence is null)
+        {
+            return null;
+        }
+
+        var sourceMessages = await context.ChatMessages
+            .AsNoTracking()
+            .Where(m => m.ConversationId == conversationId && m.Sequence <= throughSequence.Value)
+            .OrderBy(m => m.Sequence)
+            .ToListAsync(cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        var branchId = Guid.NewGuid();
+        var inputTokens = sourceMessages.Sum(m => m.InputTokenCount);
+        var outputTokens = sourceMessages.Sum(m => m.OutputTokenCount);
+        var totalTokens = sourceMessages.Sum(m => m.TotalTokenCount);
+
+        context.ChatConversations.Add(new ChatConversationEntity
+        {
+            Id = branchId,
+            Title = source.Title,
+            UserId = source.UserId,
+            AgentId = source.AgentId,
+            InputTokenCount = inputTokens,
+            OutputTokenCount = outputTokens,
+            TotalTokenCount = totalTokens,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+        });
+        context.ChatMessages.AddRange(sourceMessages.Select(message => new ChatMessageEntity
+        {
+            ConversationId = branchId,
+            Sequence = message.Sequence,
+            Role = message.Role,
+            Content = message.Content,
+            CitationsJson = message.CitationsJson,
+            InputTokenCount = message.InputTokenCount,
+            OutputTokenCount = message.OutputTokenCount,
+            TotalTokenCount = message.TotalTokenCount,
+            ModelId = message.ModelId,
+            Feedback = null,
+            CreatedAtUtc = message.CreatedAtUtc,
+        }));
+        await context.SaveChangesAsync(cancellationToken);
+
+        return new ChatConversation(
+            branchId,
+            source.Title,
+            source.UserId,
+            source.AgentId,
+            now,
+            now,
+            sourceMessages.Count,
+            inputTokens,
+            outputTokens,
+            totalTokens);
+    }
+
     public async Task RenameConversationAsync(Guid id, string title, CancellationToken cancellationToken)
     {
         var trimmed = Truncate(title, 200);
@@ -219,16 +303,13 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
         string content,
         IReadOnlyList<ChatCitation> citations,
         ChatTokenUsage? usage,
+        string? modelId,
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
         var inputTokens = usage?.InputTokens ?? 0;
         var outputTokens = usage?.OutputTokens ?? 0;
         var totalTokens = usage?.TotalTokens ?? 0;
-        var record = new ChatMessageRecord(
-            Guid.NewGuid(), conversationId, role, content, citations,
-            inputTokens, outputTokens, totalTokens, null, now);
-
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
 
         // Reading the last sequence and inserting the next one are two statements, so a transaction keeps
@@ -239,9 +320,8 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
             .Where(m => m.ConversationId == conversationId)
             .MaxAsync(m => (int?)m.Sequence, cancellationToken) ?? 0;
 
-        context.ChatMessages.Add(new ChatMessageEntity
+        var entity = new ChatMessageEntity
         {
-            Id = record.Id,
             ConversationId = conversationId,
             Sequence = lastSequence + 1,
             Role = role,
@@ -250,9 +330,15 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
             InputTokenCount = inputTokens,
             OutputTokenCount = outputTokens,
             TotalTokenCount = totalTokens,
+            ModelId = modelId,
             CreatedAtUtc = now
-        });
+        };
+        context.ChatMessages.Add(entity);
         await context.SaveChangesAsync(cancellationToken);
+
+        var record = new ChatMessageRecord(
+            entity.Id, conversationId, role, content, citations,
+            inputTokens, outputTokens, totalTokens, modelId, null, now);
 
         // The conversation list is ordered by this, so it moves to the top on every turn.
         await context.ChatConversations
@@ -320,6 +406,7 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
                 m.InputTokenCount,
                 m.OutputTokenCount,
                 m.TotalTokenCount,
+                m.ModelId,
                 m.CreatedAtUtc,
                 Question = context.ChatMessages
                     .Where(q => q.ConversationId == m.ConversationId
@@ -343,6 +430,7 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
                 r.InputTokenCount,
                 r.OutputTokenCount,
                 r.TotalTokenCount,
+                r.ModelId,
                 r.CreatedAtUtc))
             .ToList();
 
@@ -358,6 +446,7 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
         row.InputTokenCount,
         row.OutputTokenCount,
         row.TotalTokenCount,
+        row.ModelId,
         row.Feedback,
         row.CreatedAtUtc);
 

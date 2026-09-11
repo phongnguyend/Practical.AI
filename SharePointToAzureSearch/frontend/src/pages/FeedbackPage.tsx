@@ -203,6 +203,7 @@ function FeedbackCard({ entry }: { entry: FeedbackEntry }) {
           {entry.totalTokenCount > 0
             ? ` · ${formatTokenUsage(entry.totalTokenCount, entry.inputTokenCount, entry.outputTokenCount)}`
             : ''}
+          {entry.modelId ? ` · ${entry.modelId}` : ''}
         </span>
       </div>
 

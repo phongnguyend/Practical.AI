@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text;
+using Azure.AI.OpenAI;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -10,13 +11,17 @@ using AIChatRole = Microsoft.Extensions.AI.ChatRole;
 namespace SharePointToAzureSearch.Core;
 
 /// <summary>One assistant turn: what it said, what it retrieved, and the model usage it incurred.</summary>
-public sealed record ChatTurn(string Text, IReadOnlyList<ChatCitation> Citations, ChatTokenUsage Usage);
+public sealed record ChatTurn(
+    string Text,
+    IReadOnlyList<ChatCitation> Citations,
+    ChatTokenUsage Usage,
+    string? ModelId);
 
 /// <summary>Tokens consumed across every model request in an agent turn, including tool round trips.</summary>
 public sealed record ChatTokenUsage(long InputTokens, long OutputTokens, long TotalTokens);
 
 /// <summary>
-/// The chat assistant. It runs on the Azure OpenAI chat deployment configured alongside the embedding
+/// The chat assistant. It runs on the Azure OpenAI chat deployment selected by the conversation's agent
 /// model and is given four tools of its own — a hybrid search over the same index the rest of this
 /// solution fills, a download of one of the files that search returned, a refresh that takes that file
 /// again as SharePoint holds it now, and an upload of the local copy back over the document — so it
@@ -25,7 +30,7 @@ public sealed record ChatTokenUsage(long InputTokens, long OutputTokens, long To
 /// downloaded file before sending it back.
 /// </summary>
 public sealed class ChatAgentService(
-    ChatClient chatClient,
+    AzureOpenAIClient openAiClient,
     ISearchQueryStore searchStore,
     SharePointFileCache files,
     OfficeCliToolProvider officeCli,
@@ -98,6 +103,7 @@ public sealed class ChatAgentService(
         IReadOnlyList<ChatMessageRecord> history,
         string userMessage,
         string? userId,
+        string modelId,
         string instructions,
         Func<string, CancellationToken, ValueTask> onText,
         Func<string, CancellationToken, ValueTask> onStatus,
@@ -135,11 +141,13 @@ public sealed class ChatAgentService(
             .. await officeCli.GetToolsAsync(cancellationToken),
         ];
 
+        var chatClient = openAiClient.GetChatClient(modelId);
         var agent = chatClient.AsAIAgent(new ChatClientAgentOptions
         {
             Name = "SharePointSearchAgent",
             ChatOptions = new ChatOptions
             {
+                ModelId = modelId,
                 Instructions = instructions,
                 Tools = tools,
             },
@@ -216,7 +224,11 @@ public sealed class ChatAgentService(
             turnTools.Citations.Count,
             totalTokens);
 
-        return new ChatTurn(text, turnTools.Citations, new ChatTokenUsage(inputTokens, outputTokens, totalTokens));
+        return new ChatTurn(
+            text,
+            turnTools.Citations,
+            new ChatTokenUsage(inputTokens, outputTokens, totalTokens),
+            modelId);
     }
 
     private static string StatusForTool(string? name) => name switch

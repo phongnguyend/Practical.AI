@@ -181,8 +181,12 @@ app.MapDelete("/api/subscriptions/{id}", (
 
 // Persisted agent definitions. The default instruction text is exposed by the chat service so the
 // editor and server-side creation fallback always use the same private template.
-app.MapGet("/api/agents/default-instructions", () =>
-    Results.Ok(new { instructions = ChatAgentService.GetDefaultInstructions() }));
+app.MapGet("/api/agents/default-instructions", (IOptions<OpenAiOptions> openAiOptions) =>
+    Results.Ok(new
+    {
+        instructions = ChatAgentService.GetDefaultInstructions(),
+        modelId = openAiOptions.Value.ChatDeployment,
+    }));
 
 app.MapGet("/api/agents", (IAgentStore store, CancellationToken cancellationToken) =>
     store.ListAsync(cancellationToken));
@@ -199,13 +203,17 @@ app.MapGet("/api/agents/{id:guid}", async (
 app.MapPost("/api/agents", async (
     AgentDefinitionRequest? body,
     IAgentStore store,
+    IOptions<OpenAiOptions> openAiOptions,
     CancellationToken cancellationToken) =>
 {
     var name = body?.Name?.Trim() ?? "";
+    var modelId = string.IsNullOrWhiteSpace(body?.ModelId)
+        ? openAiOptions.Value.ChatDeployment
+        : body.ModelId.Trim();
     var instructions = string.IsNullOrWhiteSpace(body?.Instructions)
         ? ChatAgentService.GetDefaultInstructions()
         : body.Instructions.Trim();
-    var error = ValidateAgentDefinition(name, instructions);
+    var error = ValidateAgentDefinition(name, modelId, instructions);
     if (error is not null)
     {
         return Results.BadRequest(new { error });
@@ -213,7 +221,7 @@ app.MapPost("/api/agents", async (
 
     try
     {
-        var created = await store.CreateAsync(name, instructions, cancellationToken);
+        var created = await store.CreateAsync(name, modelId, instructions, cancellationToken);
         return Results.Created($"/api/agents/{created.Id}", created);
     }
     catch (AgentNameConflictException ex)
@@ -229,8 +237,9 @@ app.MapPut("/api/agents/{id:guid}", async (
     CancellationToken cancellationToken) =>
 {
     var name = body?.Name?.Trim() ?? "";
+    var modelId = body?.ModelId?.Trim() ?? "";
     var instructions = body?.Instructions?.Trim() ?? "";
-    var error = ValidateAgentDefinition(name, instructions);
+    var error = ValidateAgentDefinition(name, modelId, instructions);
     if (error is not null)
     {
         return Results.BadRequest(new { error });
@@ -238,7 +247,7 @@ app.MapPut("/api/agents/{id:guid}", async (
 
     try
     {
-        var updated = await store.UpdateAsync(id, name, instructions, cancellationToken);
+        var updated = await store.UpdateAsync(id, name, modelId, instructions, cancellationToken);
         return updated is null ? Results.NotFound() : Results.Ok(updated);
     }
     catch (AgentNameConflictException ex)
@@ -296,6 +305,18 @@ app.MapDelete("/api/chat/conversations/{id:guid}", async (
         ? Results.Ok(new { deleted = id })
         : Results.NotFound());
 
+app.MapPost("/api/chat/conversations/{id:guid}/branch/{messageId:guid}", async (
+    Guid id,
+    Guid messageId,
+    IChatStore store,
+    CancellationToken cancellationToken) =>
+{
+    var branch = await store.BranchConversationAsync(id, messageId, cancellationToken);
+    return branch is null
+        ? Results.NotFound(new { error = "The conversation or selected message does not exist." })
+        : Results.Ok(branch);
+});
+
 app.MapGet("/api/chat/conversations/{id:guid}/messages", async (
     Guid id,
     IChatStore store,
@@ -345,7 +366,8 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
 
     // The question is stored before the model runs, so a failed or cancelled turn still leaves the
     // conversation showing what was asked.
-    var question = await store.AppendMessageAsync(id, ChatMessageRole.User, content, [], null, cancellationToken);
+    var question = await store.AppendMessageAsync(
+        id, ChatMessageRole.User, content, [], null, null, cancellationToken);
 
     // A conversation created from the sidebar has no title until its first question supplies one.
     var renamed = conversation.Title;
@@ -386,6 +408,7 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
             history,
             content,
             conversation.UserId,
+            selectedAgent.ModelId,
             selectedAgent.Instructions,
             (text, token) => WriteEventAsync(new ChatStreamEvent("delta", Text: text), token),
             (status, token) => WriteEventAsync(new ChatStreamEvent("status", Message: status), token),
@@ -401,7 +424,7 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
     }
 
     var answer = await store.AppendMessageAsync(
-        id, ChatMessageRole.Assistant, turn.Text, turn.Citations, turn.Usage, cancellationToken);
+        id, ChatMessageRole.Assistant, turn.Text, turn.Citations, turn.Usage, turn.ModelId, cancellationToken);
     await WriteEventAsync(new ChatStreamEvent("completed", Answer: answer, Title: renamed), cancellationToken);
     return Results.Empty;
 });
@@ -502,7 +525,7 @@ static bool SecureEquals(string? left, string right)
     return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
 }
 
-static string? ValidateAgentDefinition(string name, string instructions)
+static string? ValidateAgentDefinition(string name, string modelId, string instructions)
 {
     if (string.IsNullOrWhiteSpace(name))
     {
@@ -512,6 +535,16 @@ static string? ValidateAgentDefinition(string name, string instructions)
     if (name.Length > 100)
     {
         return "'name' cannot exceed 100 characters.";
+    }
+
+    if (string.IsNullOrWhiteSpace(modelId))
+    {
+        return "A non-empty 'modelId' is required.";
+    }
+
+    if (modelId.Length > 200)
+    {
+        return "'modelId' cannot exceed 200 characters.";
     }
 
     return string.IsNullOrWhiteSpace(instructions) ? "Non-empty 'instructions' are required." : null;
@@ -553,7 +586,7 @@ public sealed record NewConversation(string? Title, string? UserId, string? Agen
 
 public sealed record ChatTurnRequest(string? Content);
 
-public sealed record AgentDefinitionRequest(string? Name, string? Instructions);
+public sealed record AgentDefinitionRequest(string? Name, string? ModelId, string? Instructions);
 
 /// <summary>One newline-delimited event sent while a chat turn is running.</summary>
 public sealed record ChatStreamEvent(

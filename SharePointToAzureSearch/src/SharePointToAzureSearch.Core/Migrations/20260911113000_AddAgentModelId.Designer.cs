@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SharePointToAzureSearch.Core.Data;
 
@@ -11,9 +12,11 @@ using SharePointToAzureSearch.Core.Data;
 namespace SharePointToAzureSearch.Core.Migrations
 {
     [DbContext(typeof(SharePointIndexDbContext))]
-    partial class SharePointIndexDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260911113000_AddAgentModelId")]
+    partial class AddAgentModelId
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -105,9 +108,7 @@ namespace SharePointToAzureSearch.Core.Migrations
             modelBuilder.Entity("SharePointToAzureSearch.Core.Data.ChatMessageEntity", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier")
-                        .HasDefaultValueSql("NEWSEQUENTIALID()");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("CitationsJson")
                         .HasColumnType("nvarchar(max)");

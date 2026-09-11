@@ -7,6 +7,7 @@ import {
   Check,
   Copy,
   ExternalLink,
+  GitBranch,
   MessageSquare,
   Plus,
   SendHorizontal,
@@ -18,6 +19,7 @@ import {
   X,
 } from 'lucide-react'
 import {
+  branchConversation,
   createConversation,
   deleteConversation,
   getThread,
@@ -186,6 +188,19 @@ export default function ChatPage() {
     }
   }
 
+  const branch = async (messageId: string) => {
+    if (!activeId) return
+
+    setError(null)
+    try {
+      const created = await branchConversation(activeId, messageId)
+      conversations.reload()
+      open(created.id)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
   const remove = async (id: string) => {
     setError(null)
     setConfirmDelete(null)
@@ -222,6 +237,7 @@ export default function ChatPage() {
       inputTokenCount: 0,
       outputTokenCount: 0,
       totalTokenCount: 0,
+      modelId: null,
       feedback: null,
       createdAtUtc: new Date().toISOString(),
     }
@@ -358,6 +374,7 @@ export default function ChatPage() {
                   message={message}
                   highlighted={message.id === highlighted}
                   onFeedback={react}
+                  onBranch={branch}
                 />
               ))
             )}
@@ -490,10 +507,12 @@ function MessageBubble({
   message,
   highlighted,
   onFeedback,
+  onBranch,
 }: {
   message: ChatMessage
   highlighted: boolean
   onFeedback: (id: string, feedback: ChatFeedback | null) => void
+  onBranch: (id: string) => Promise<void>
 }) {
   const isUser = message.role === 'User'
   const classes = [
@@ -524,9 +543,12 @@ function MessageBubble({
                 message.inputTokenCount,
                 message.outputTokenCount,
               )}
+              {message.modelId ? ` · ${message.modelId}` : ''}
             </span>
           ) : null}
-          {!isUser ? <MessageActions message={message} onFeedback={onFeedback} /> : null}
+          {!isUser ? (
+            <MessageActions message={message} onFeedback={onFeedback} onBranch={onBranch} />
+          ) : null}
         </div>
         {message.citations.length > 0 ? <Citations citations={message.citations} /> : null}
       </div>
@@ -541,11 +563,14 @@ function MessageBubble({
 function MessageActions({
   message,
   onFeedback,
+  onBranch,
 }: {
   message: ChatMessage
   onFeedback: (id: string, feedback: ChatFeedback | null) => void
+  onBranch: (id: string) => Promise<void>
 }) {
   const [copied, setCopied] = useState(false)
+  const [branching, setBranching] = useState(false)
 
   useEffect(() => {
     if (!copied) return
@@ -582,6 +607,18 @@ function MessageActions({
         onClick={() => onFeedback(message.id, message.feedback === 'Dislike' ? null : 'Dislike')}
       >
         <ThumbsDown size={13} />
+      </button>
+      <button
+        className="ghost icon-only"
+        title="Branch in new chat"
+        aria-label="Branch in new chat"
+        disabled={branching}
+        onClick={() => {
+          setBranching(true)
+          void onBranch(message.id).finally(() => setBranching(false))
+        }}
+      >
+        <GitBranch size={13} />
       </button>
     </div>
   )

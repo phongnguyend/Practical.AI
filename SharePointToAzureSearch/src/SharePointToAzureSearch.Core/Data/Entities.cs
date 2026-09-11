@@ -4,6 +4,7 @@ public sealed class AgentDefinitionEntity
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = "";
+    public string? ModelId { get; set; }
     public string Instructions { get; set; } = "";
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
@@ -88,6 +89,7 @@ public sealed class ChatMessageEntity
     public long InputTokenCount { get; set; }
     public long OutputTokenCount { get; set; }
     public long TotalTokenCount { get; set; }
+    public string? ModelId { get; set; }
 
     public ChatFeedback? Feedback { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }

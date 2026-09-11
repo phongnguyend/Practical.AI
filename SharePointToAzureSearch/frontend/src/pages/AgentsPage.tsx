@@ -19,6 +19,7 @@ export default function AgentsPage() {
   const [viewing, setViewing] = useState<AgentDefinition | null>(null)
   const [editing, setEditing] = useState<EditorTarget>(null)
   const [name, setName] = useState('')
+  const [modelId, setModelId] = useState('')
   const [instructions, setInstructions] = useState('')
   const [busy, setBusy] = useState(false)
   const [dialogError, setDialogError] = useState<string | null>(null)
@@ -28,6 +29,7 @@ export default function AgentsPage() {
 
   const openCreate = () => {
     setName('')
+    setModelId(defaults.data?.modelId ?? '')
     setInstructions(defaults.data?.instructions ?? '')
     setDialogError(null)
     setEditing('new')
@@ -35,6 +37,7 @@ export default function AgentsPage() {
 
   const openEdit = (agent: AgentDefinition) => {
     setName(agent.name)
+    setModelId(agent.modelId)
     setInstructions(agent.instructions)
     setDialogError(null)
     setEditing(agent)
@@ -42,9 +45,10 @@ export default function AgentsPage() {
 
   const save = async () => {
     const trimmedName = name.trim()
+    const trimmedModelId = modelId.trim()
     const trimmedInstructions = instructions.trim()
-    if (!trimmedName || !trimmedInstructions) {
-      setDialogError('Name and instructions are required.')
+    if (!trimmedName || !trimmedModelId || !trimmedInstructions) {
+      setDialogError('Name, model ID, and instructions are required.')
       return
     }
 
@@ -53,10 +57,10 @@ export default function AgentsPage() {
     setNotice(null)
     try {
       if (editing === 'new') {
-        await createAgent(trimmedName, trimmedInstructions)
+        await createAgent(trimmedName, trimmedModelId, trimmedInstructions)
         setNotice('Agent created.')
       } else if (editing) {
-        await updateAgent(editing.id, trimmedName, trimmedInstructions)
+        await updateAgent(editing.id, trimmedName, trimmedModelId, trimmedInstructions)
         setNotice('Agent updated.')
       }
       setEditing(null)
@@ -117,6 +121,9 @@ export default function AgentsPage() {
                 </span>
               </div>
               <div className="card-body stack" style={{ gap: 14 }}>
+                <span className="badge agent-model-id" title="Model ID">
+                  {agent.modelId}
+                </span>
                 <p className="agent-preview">{agent.instructions}</p>
                 <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
                   <button onClick={() => setViewing(agent)}>
@@ -155,7 +162,14 @@ export default function AgentsPage() {
           </button>
         }
       >
-        {viewing ? <pre className="agent-instructions">{viewing.instructions}</pre> : null}
+        {viewing ? (
+          <div className="stack" style={{ gap: 12 }}>
+            <span className="badge agent-model-id" title="Model ID">
+              {viewing.modelId}
+            </span>
+            <pre className="agent-instructions">{viewing.instructions}</pre>
+          </div>
+        ) : null}
       </Modal>
 
       <Modal
@@ -172,7 +186,7 @@ export default function AgentsPage() {
             </button>
             <button
               className="primary"
-              disabled={busy || !name.trim() || !instructions.trim()}
+              disabled={busy || !name.trim() || !modelId.trim() || !instructions.trim()}
               onClick={() => void save()}
             >
               {editing === 'new' ? <Plus size={14} /> : <Check size={14} />}
@@ -191,8 +205,8 @@ export default function AgentsPage() {
             <div>
               <strong>Define this agent&apos;s behavior</strong>
               <span>
-                Give it a recognizable name, then describe its role, tool rules, safety boundaries,
-                and preferred response style.
+                Choose the model it uses, then describe its role, tool rules, safety boundaries, and
+                preferred response style.
               </span>
             </div>
           </div>
@@ -214,6 +228,18 @@ export default function AgentsPage() {
                 disabled={editingDefault}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="For example: Contract reviewer"
+              />
+            </Field>
+            <Field
+              label="Model ID"
+              help="Azure OpenAI deployment/model ID used for this agent."
+            >
+              <input
+                type="text"
+                maxLength={200}
+                value={modelId}
+                onChange={(event) => setModelId(event.target.value)}
+                placeholder="For example: gpt-5-mini"
               />
             </Field>
             <span className="badge accent">

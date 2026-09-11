@@ -59,15 +59,13 @@ public static class DependencyInjection
         services.AddOptions<OfficeCliOptions>().Bind(configuration.GetSection(OfficeCliOptions.SectionName)).ValidateDataAnnotations()
             .Validate(o => !o.Enabled || o.IsConfigured, "OfficeCli:Command is required when OfficeCli:Enabled is true.").ValidateOnStart();
 
-        // The chat deployment sits on the same Azure OpenAI resource as the embedding model, so it is
-        // reached through the same endpoint and credential.
+        // Keep the resource client so each persisted agent can select its own chat deployment.
         services.AddSingleton(sp =>
         {
             var options = sp.GetRequiredService<IOptions<OpenAiOptions>>().Value;
-            var client = options.UsedManagedIdentity
+            return options.UsedManagedIdentity
                 ? new AzureOpenAIClient(new Uri(options.Endpoint), CreateManagedIdentityCredential())
                 : new AzureOpenAIClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey!));
-            return client.GetChatClient(options.ChatDeployment);
         });
 
         services.AddSingleton<IChatStore, EfChatStore>();

@@ -1398,13 +1398,21 @@ button.ghost:hover:not(:disabled) {
 
 .agent-editor-name-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
 }
 
 .agent-editor-name-row input {
   width: 100%;
+}
+
+.agent-model-id {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .agent-instructions-field {

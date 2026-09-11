@@ -3,6 +3,7 @@
 export interface AgentDefinition {
   id: string
   name: string
+  modelId: string
   instructions: string
   createdAtUtc: string
   updatedAtUtc: string
@@ -113,6 +114,7 @@ export interface ChatMessage {
   inputTokenCount: number
   outputTokenCount: number
   totalTokenCount: number
+  modelId: string | null
   /** What the reader thought of the answer, null until they say. */
   feedback: ChatFeedback | null
   createdAtUtc: string
@@ -130,6 +132,7 @@ export interface FeedbackEntry {
   inputTokenCount: number
   outputTokenCount: number
   totalTokenCount: number
+  modelId: string | null
   createdAtUtc: string
 }
 

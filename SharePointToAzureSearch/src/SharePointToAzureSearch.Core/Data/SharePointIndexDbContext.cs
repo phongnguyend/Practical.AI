@@ -28,6 +28,7 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasDefaultValueSql("NEWSEQUENTIALID()").ValueGeneratedOnAdd();
             entity.Property(x => x.Name).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.ModelId).HasMaxLength(200);
             entity.Property(x => x.Instructions).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasPrecision(7);
             entity.Property(x => x.UpdatedAtUtc).HasPrecision(7);
@@ -88,8 +89,9 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
         {
             entity.ToTable("ChatMessages");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.Id).HasDefaultValueSql("NEWSEQUENTIALID()").ValueGeneratedOnAdd();
             entity.Property(x => x.Content).IsRequired();
+            entity.Property(x => x.ModelId).HasMaxLength(200);
             entity.Property(x => x.CreatedAtUtc).HasPrecision(7);
 
             // Both enums are stored by name, so a row is readable without the application.

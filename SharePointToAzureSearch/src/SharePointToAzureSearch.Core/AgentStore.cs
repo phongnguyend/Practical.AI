@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Options;
 using SharePointToAzureSearch.Core.Data;
 
 namespace SharePointToAzureSearch.Core;
@@ -8,6 +9,7 @@ namespace SharePointToAzureSearch.Core;
 public sealed record AgentDefinition(
     Guid Id,
     string Name,
+    string ModelId,
     string Instructions,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
@@ -22,8 +24,17 @@ public interface IAgentStore
     Task<IReadOnlyList<AgentDefinition>> ListAsync(CancellationToken cancellationToken);
     Task<AgentDefinition?> GetAsync(Guid id, CancellationToken cancellationToken);
     Task<AgentDefinition?> GetByNameAsync(string name, CancellationToken cancellationToken);
-    Task<AgentDefinition> CreateAsync(string name, string instructions, CancellationToken cancellationToken);
-    Task<AgentDefinition?> UpdateAsync(Guid id, string name, string instructions, CancellationToken cancellationToken);
+    Task<AgentDefinition> CreateAsync(
+        string name,
+        string modelId,
+        string instructions,
+        CancellationToken cancellationToken);
+    Task<AgentDefinition?> UpdateAsync(
+        Guid id,
+        string name,
+        string modelId,
+        string instructions,
+        CancellationToken cancellationToken);
 }
 
 public sealed class AgentNameConflictException(string name)
@@ -33,15 +44,20 @@ public sealed class DefaultAgentNameChangeException()
     : Exception("The default agent's name cannot be changed.");
 
 /// <summary>Stores agent definitions in the application's SQL Server database.</summary>
-public sealed class EfAgentStore(IDbContextFactory<SharePointIndexDbContext> contextFactory) : IAgentStore
+public sealed class EfAgentStore(
+    IDbContextFactory<SharePointIndexDbContext> contextFactory,
+    IOptions<OpenAiOptions> openAiOptions) : IAgentStore
 {
+    private readonly string _defaultModelId = openAiOptions.Value.ChatDeployment;
+
     public async Task<IReadOnlyList<AgentDefinition>> ListAsync(CancellationToken cancellationToken)
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
         return await context.AgentDefinitions
             .AsNoTracking()
             .OrderBy(a => a.Name)
-            .Select(a => new AgentDefinition(a.Id, a.Name, a.Instructions, a.CreatedAtUtc, a.UpdatedAtUtc))
+            .Select(a => new AgentDefinition(
+                a.Id, a.Name, a.ModelId ?? _defaultModelId, a.Instructions, a.CreatedAtUtc, a.UpdatedAtUtc))
             .ToListAsync(cancellationToken);
     }
 
@@ -51,7 +67,8 @@ public sealed class EfAgentStore(IDbContextFactory<SharePointIndexDbContext> con
         return await context.AgentDefinitions
             .AsNoTracking()
             .Where(a => a.Id == id)
-            .Select(a => new AgentDefinition(a.Id, a.Name, a.Instructions, a.CreatedAtUtc, a.UpdatedAtUtc))
+            .Select(a => new AgentDefinition(
+                a.Id, a.Name, a.ModelId ?? _defaultModelId, a.Instructions, a.CreatedAtUtc, a.UpdatedAtUtc))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -61,12 +78,14 @@ public sealed class EfAgentStore(IDbContextFactory<SharePointIndexDbContext> con
         return await context.AgentDefinitions
             .AsNoTracking()
             .Where(a => a.Name == name)
-            .Select(a => new AgentDefinition(a.Id, a.Name, a.Instructions, a.CreatedAtUtc, a.UpdatedAtUtc))
+            .Select(a => new AgentDefinition(
+                a.Id, a.Name, a.ModelId ?? _defaultModelId, a.Instructions, a.CreatedAtUtc, a.UpdatedAtUtc))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
     public async Task<AgentDefinition> CreateAsync(
         string name,
+        string modelId,
         string instructions,
         CancellationToken cancellationToken)
     {
@@ -74,6 +93,7 @@ public sealed class EfAgentStore(IDbContextFactory<SharePointIndexDbContext> con
         var entity = new AgentDefinitionEntity
         {
             Name = name,
+            ModelId = modelId,
             Instructions = instructions,
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
@@ -102,6 +122,7 @@ public sealed class EfAgentStore(IDbContextFactory<SharePointIndexDbContext> con
     public async Task<AgentDefinition?> UpdateAsync(
         Guid id,
         string name,
+        string modelId,
         string instructions,
         CancellationToken cancellationToken)
     {
@@ -124,6 +145,7 @@ public sealed class EfAgentStore(IDbContextFactory<SharePointIndexDbContext> con
         }
 
         entity.Name = name;
+        entity.ModelId = modelId;
         entity.Instructions = instructions;
         entity.UpdatedAtUtc = DateTimeOffset.UtcNow;
         try
@@ -138,9 +160,10 @@ public sealed class EfAgentStore(IDbContextFactory<SharePointIndexDbContext> con
         return ToRecord(entity);
     }
 
-    private static AgentDefinition ToRecord(AgentDefinitionEntity entity) => new(
+    private AgentDefinition ToRecord(AgentDefinitionEntity entity) => new(
         entity.Id,
         entity.Name,
+        entity.ModelId ?? _defaultModelId,
         entity.Instructions,
         entity.CreatedAtUtc,
         entity.UpdatedAtUtc);
