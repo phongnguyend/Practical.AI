@@ -1,5 +1,14 @@
 namespace SharePointToAzureSearch.Core.Data;
 
+public sealed class AgentDefinitionEntity
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = "";
+    public string Instructions { get; set; } = "";
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
 /// <summary>
 /// One row of the delta-checkpoint table: where the next delta pass for a drive resumes from. Maps
 /// <see cref="DeltaCheckpoint"/> plus the timestamp the worker last wrote it.
@@ -72,6 +81,11 @@ public sealed class ChatMessageEntity
     /// as text rather than a mapped collection: citations are only ever read back whole, with the message.
     /// </summary>
     public string? CitationsJson { get; set; }
+
+    /// <summary>Model usage for this response. User messages and historical rows have zeroes.</summary>
+    public long InputTokenCount { get; set; }
+    public long OutputTokenCount { get; set; }
+    public long TotalTokenCount { get; set; }
 
     public ChatFeedback? Feedback { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }

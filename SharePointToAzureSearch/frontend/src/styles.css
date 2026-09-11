@@ -1259,6 +1259,207 @@ button.ghost:hover:not(:disabled) {
   max-height: 180px;
 }
 
+/* Agent instruction cards keep long prompts scannable; the full text is available in View/Edit. */
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 14px;
+}
+
+.agent-card {
+  min-width: 0;
+}
+
+.agent-preview {
+  margin: 0;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+}
+
+.agent-instructions {
+  margin: 0;
+  padding: 12px;
+  max-height: min(60vh, 620px);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-family: var(--sans);
+  font-size: 13px;
+}
+
+.agent-instructions-editor {
+  width: 100%;
+  min-height: 340px;
+  height: min(48vh, 500px);
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 14px 16px;
+  tab-size: 2;
+}
+
+.modal.agent-editor-modal {
+  width: min(860px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+/* Do not override the browser's dialog:not([open]) display:none rule when the modal closes. */
+.modal.agent-editor-modal[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.agent-editor-modal .modal-head {
+  padding: 18px 20px;
+}
+
+.agent-editor-modal .modal-head h2 {
+  font-size: 17px;
+}
+
+.agent-editor-modal .modal-body {
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.agent-editor-modal .modal-foot {
+  padding: 14px 20px;
+}
+
+.agent-editor-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.agent-editor-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent-soft) 58%, var(--surface-1));
+}
+
+.agent-editor-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  background: var(--surface-1);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.agent-editor-intro div > strong,
+.agent-editor-intro div > span {
+  display: block;
+}
+
+.agent-editor-intro strong {
+  margin-bottom: 2px;
+  font-size: 13px;
+}
+
+.agent-editor-intro div > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.agent-editor-name-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.agent-editor-name-row input {
+  width: 100%;
+}
+
+.agent-instructions-field {
+  min-width: 0;
+}
+
+.agent-instructions-label,
+.agent-editor-help {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-instructions-label {
+  margin-bottom: 7px;
+}
+
+.agent-instructions-label label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.agent-instructions-label span,
+.agent-editor-help {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.agent-editor-help {
+  min-height: 28px;
+  margin-top: 5px;
+}
+
+.agent-editor-help .ghost {
+  padding: 4px 7px;
+  font-size: 11px;
+}
+
+.modal.agent-view-modal {
+  width: min(760px, calc(100vw - 40px));
+}
+
+@media (max-width: 640px) {
+  .modal.agent-editor-modal {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+  }
+
+  .agent-editor-modal .modal-head,
+  .agent-editor-modal .modal-body,
+  .agent-editor-modal .modal-foot {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .agent-editor-name-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .agent-editor-name-row .badge {
+    justify-self: start;
+  }
+
+  .agent-instructions-editor {
+    min-height: 280px;
+  }
+}
+
 @media (max-width: 900px) {
   .chat-shell {
     grid-template-columns: minmax(0, 1fr);

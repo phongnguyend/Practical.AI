@@ -15,6 +15,7 @@ import {
   Trash2,
   TriangleAlert,
   Webhook,
+  X,
 } from 'lucide-react'
 import {
   createSubscription,
@@ -254,6 +255,7 @@ export default function SubscriptionsPage() {
         footer={
           <>
             <button onClick={() => setEditing(null)} disabled={busy === 'save'}>
+              <X size={14} />
               Cancel
             </button>
             <button

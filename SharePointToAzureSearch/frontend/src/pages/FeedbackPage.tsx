@@ -189,8 +189,12 @@ function FeedbackCard({ entry }: { entry: FeedbackEntry }) {
             {entry.conversationTitle}
           </Link>
         </h2>
-        <span className="hint" title={formatDateTime(entry.createdAtUtc)}>
+        <span
+          className="hint"
+          title={`${formatDateTime(entry.createdAtUtc)} · ${formatNumber(entry.inputTokenCount)} input + ${formatNumber(entry.outputTokenCount)} output`}
+        >
           {formatRelative(entry.createdAtUtc)}
+          {entry.totalTokenCount > 0 ? ` · ${formatNumber(entry.totalTokenCount)} tokens` : ''}
         </span>
       </div>
 

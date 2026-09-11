@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import {
   FileText,
+  Bot,
   GitBranch,
   LayoutDashboard,
   Monitor,
@@ -19,6 +20,7 @@ import SearchPage from './pages/SearchPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
 import ChatPage from './pages/ChatPage'
 import FeedbackPage from './pages/FeedbackPage'
+import AgentsPage from './pages/AgentsPage'
 
 type Theme = 'system' | 'light' | 'dark'
 
@@ -83,6 +85,10 @@ export default function App() {
             <Scale size={16} />
             Feedback
           </NavLink>
+          <NavLink to="/agents">
+            <Bot size={16} />
+            Agents
+          </NavLink>
         </nav>
         <button
           className="ghost"
@@ -104,6 +110,7 @@ export default function App() {
           <Route path="/search" element={<SearchPage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/feedback" element={<FeedbackPage />} />
+          <Route path="/agents" element={<AgentsPage />} />
           <Route path="*" element={<Navigate to="/overview" replace />} />
         </Routes>
       </main>

@@ -14,6 +14,7 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
     /// <summary>Identifier columns that carry a Microsoft Graph drive or item ID.</summary>
     private const int IdentifierLength = 200;
 
+    public DbSet<AgentDefinitionEntity> AgentDefinitions => Set<AgentDefinitionEntity>();
     public DbSet<DeltaStateEntity> DeltaState => Set<DeltaStateEntity>();
     public DbSet<IndexedFileEntity> IndexedFiles => Set<IndexedFileEntity>();
     public DbSet<ChatConversationEntity> ChatConversations => Set<ChatConversationEntity>();
@@ -21,6 +22,18 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<AgentDefinitionEntity>(entity =>
+        {
+            entity.ToTable("AgentDefinitions");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.Name).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Instructions).IsRequired();
+            entity.Property(x => x.CreatedAtUtc).HasPrecision(7);
+            entity.Property(x => x.UpdatedAtUtc).HasPrecision(7);
+            entity.HasIndex(x => x.Name).IsUnique();
+        });
+
         modelBuilder.Entity<DeltaStateEntity>(entity =>
         {
             entity.ToTable("SharePointDeltaState");

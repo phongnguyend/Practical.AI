@@ -71,6 +71,7 @@ public static class DependencyInjection
         });
 
         services.AddSingleton<IChatStore, EfChatStore>();
+        services.AddSingleton<IAgentStore, EfAgentStore>();
         services.AddSingleton<SharePointFileCache>();
 
         // One officecli child process per application, shared by every turn and shut down with the

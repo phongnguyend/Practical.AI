@@ -1,4 +1,5 @@
 import type {
+  AgentDefinition,
   ChatConversation,
   ChatFeedback,
   ChatStreamEvent,
@@ -193,6 +194,38 @@ export async function sendChatMessage(
   }
 
   return { question, answer, title }
+}
+
+export function listAgents(signal?: AbortSignal): Promise<AgentDefinition[]> {
+  return request<AgentDefinition[]>('/api/agents', { signal })
+}
+
+export function getAgent(id: string, signal?: AbortSignal): Promise<AgentDefinition> {
+  return request<AgentDefinition>(`/api/agents/${encodeURIComponent(id)}`, { signal })
+}
+
+export function getDefaultAgentInstructions(signal?: AbortSignal): Promise<{ instructions: string }> {
+  return request<{ instructions: string }>('/api/agents/default-instructions', { signal })
+}
+
+export function createAgent(name: string, instructions?: string): Promise<AgentDefinition> {
+  return request<AgentDefinition>('/api/agents', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, instructions: instructions?.trim() || null }),
+  })
+}
+
+export function updateAgent(
+  id: string,
+  name: string,
+  instructions: string,
+): Promise<AgentDefinition> {
+  return request<AgentDefinition>(`/api/agents/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, instructions }),
+  })
 }
 
 export function listFeedback(

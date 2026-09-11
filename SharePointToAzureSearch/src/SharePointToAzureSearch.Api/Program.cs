@@ -179,6 +179,74 @@ app.MapDelete("/api/subscriptions/{id}", (
         return new { deleted = id };
     }));
 
+// Persisted agent definitions. The default instruction text is exposed by the chat service so the
+// editor and server-side creation fallback always use the same private template.
+app.MapGet("/api/agents/default-instructions", () =>
+    Results.Ok(new { instructions = ChatAgentService.GetDefaultInstructions() }));
+
+app.MapGet("/api/agents", (IAgentStore store, CancellationToken cancellationToken) =>
+    store.ListAsync(cancellationToken));
+
+app.MapGet("/api/agents/{id:guid}", async (
+    Guid id,
+    IAgentStore store,
+    CancellationToken cancellationToken) =>
+{
+    var agent = await store.GetAsync(id, cancellationToken);
+    return agent is null ? Results.NotFound() : Results.Ok(agent);
+});
+
+app.MapPost("/api/agents", async (
+    AgentDefinitionRequest? body,
+    IAgentStore store,
+    CancellationToken cancellationToken) =>
+{
+    var name = body?.Name?.Trim() ?? "";
+    var instructions = string.IsNullOrWhiteSpace(body?.Instructions)
+        ? ChatAgentService.GetDefaultInstructions()
+        : body.Instructions.Trim();
+    var error = ValidateAgentDefinition(name, instructions);
+    if (error is not null)
+    {
+        return Results.BadRequest(new { error });
+    }
+
+    try
+    {
+        var created = await store.CreateAsync(name, instructions, cancellationToken);
+        return Results.Created($"/api/agents/{created.Id}", created);
+    }
+    catch (AgentNameConflictException ex)
+    {
+        return Results.Conflict(new { error = ex.Message });
+    }
+});
+
+app.MapPut("/api/agents/{id:guid}", async (
+    Guid id,
+    AgentDefinitionRequest? body,
+    IAgentStore store,
+    CancellationToken cancellationToken) =>
+{
+    var name = body?.Name?.Trim() ?? "";
+    var instructions = body?.Instructions?.Trim() ?? "";
+    var error = ValidateAgentDefinition(name, instructions);
+    if (error is not null)
+    {
+        return Results.BadRequest(new { error });
+    }
+
+    try
+    {
+        var updated = await store.UpdateAsync(id, name, instructions, cancellationToken);
+        return updated is null ? Results.NotFound() : Results.Ok(updated);
+    }
+    catch (AgentNameConflictException ex)
+    {
+        return Results.Conflict(new { error = ex.Message });
+    }
+});
+
 // The chat assistant. Conversations live in SQL Server; each turn replays the stored history to an
 // agent that can search the index, and both the question and the answer are appended.
 app.MapGet("/api/chat/conversations", (
@@ -399,6 +467,21 @@ static bool SecureEquals(string? left, string right)
     return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
 }
 
+static string? ValidateAgentDefinition(string name, string instructions)
+{
+    if (string.IsNullOrWhiteSpace(name))
+    {
+        return "A non-empty 'name' is required.";
+    }
+
+    if (name.Length > 100)
+    {
+        return "'name' cannot exceed 100 characters.";
+    }
+
+    return string.IsNullOrWhiteSpace(instructions) ? "Non-empty 'instructions' are required." : null;
+}
+
 /// <summary>
 /// Request body for the search endpoints. When <see cref="UserId"/> is supplied, results are restricted to
 /// content that user is allowed to view; omitting it searches the whole index.
@@ -426,6 +509,8 @@ public sealed record CreateSubscriptionRequest(int? Days, string? NotificationUr
 public sealed record NewConversation(string? Title, string? UserId);
 
 public sealed record ChatTurnRequest(string? Content);
+
+public sealed record AgentDefinitionRequest(string? Name, string? Instructions);
 
 /// <summary>One newline-delimited event sent while a chat turn is running.</summary>
 public sealed record ChatStreamEvent(

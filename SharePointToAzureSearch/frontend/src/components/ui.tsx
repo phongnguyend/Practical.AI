@@ -21,6 +21,7 @@ export function Modal({
   open,
   title,
   icon,
+  className,
   onClose,
   children,
   footer,
@@ -28,6 +29,7 @@ export function Modal({
   open: boolean
   title: string
   icon?: ReactNode
+  className?: string
   onClose: () => void
   children: ReactNode
   footer?: ReactNode
@@ -48,7 +50,7 @@ export function Modal({
   return (
     <dialog
       ref={ref}
-      className="modal"
+      className={className ? `modal ${className}` : 'modal'}
       onCancel={(event) => {
         event.preventDefault()
         onClose()
@@ -64,7 +66,7 @@ export function Modal({
           {icon}
           {title}
         </h2>
-        <button className="ghost" onClick={onClose} aria-label="Close">
+        <button className="ghost icon-only" onClick={onClose} aria-label="Close">
           <X size={15} />
         </button>
       </div>

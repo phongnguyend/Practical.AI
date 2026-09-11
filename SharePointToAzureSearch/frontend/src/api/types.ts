@@ -1,5 +1,13 @@
 /** Mirrors the records the API returns. Property names match its camelCase JSON. */
 
+export interface AgentDefinition {
+  id: string
+  name: string
+  instructions: string
+  createdAtUtc: string
+  updatedAtUtc: string
+}
+
 export interface PagedResult<T> {
   totalCount: number
   items: T[]
@@ -100,6 +108,9 @@ export interface ChatMessage {
   role: 'User' | 'Assistant'
   content: string
   citations: ChatCitation[]
+  inputTokenCount: number
+  outputTokenCount: number
+  totalTokenCount: number
   /** What the reader thought of the answer, null until they say. */
   feedback: ChatFeedback | null
   createdAtUtc: string
@@ -114,6 +125,9 @@ export interface FeedbackEntry {
   question: string | null
   answer: string
   citations: ChatCitation[]
+  inputTokenCount: number
+  outputTokenCount: number
+  totalTokenCount: number
   createdAtUtc: string
 }
 

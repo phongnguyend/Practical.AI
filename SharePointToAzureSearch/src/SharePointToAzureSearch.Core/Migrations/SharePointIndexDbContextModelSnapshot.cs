@@ -22,6 +22,36 @@ namespace SharePointToAzureSearch.Core.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("SharePointToAzureSearch.Core.Data.AgentDefinitionEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<string>("Instructions")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("AgentDefinitions", (string)null);
+                });
+
             modelBuilder.Entity("SharePointToAzureSearch.Core.Data.ChatConversationEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -84,6 +114,12 @@ namespace SharePointToAzureSearch.Core.Migrations
                         .HasMaxLength(10)
                         .HasColumnType("nvarchar(10)");
 
+                    b.Property<long>("InputTokenCount")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OutputTokenCount")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -91,6 +127,9 @@ namespace SharePointToAzureSearch.Core.Migrations
 
                     b.Property<int>("Sequence")
                         .HasColumnType("int");
+
+                    b.Property<long>("TotalTokenCount")
+                        .HasColumnType("bigint");
 
                     b.HasKey("Id");
 

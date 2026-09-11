@@ -198,6 +198,9 @@ export default function ChatPage() {
       role: 'User',
       content,
       citations: [],
+      inputTokenCount: 0,
+      outputTokenCount: 0,
+      totalTokenCount: 0,
       feedback: null,
       createdAtUtc: new Date().toISOString(),
     }
@@ -432,6 +435,14 @@ function MessageBubble({
           <span className="chat-time" title={formatDateTime(message.createdAtUtc)}>
             {formatMessageTime(message.createdAtUtc)}
           </span>
+          {!isUser && message.totalTokenCount > 0 ? (
+            <span
+              className="chat-time"
+              title={`${formatNumber(message.inputTokenCount)} input + ${formatNumber(message.outputTokenCount)} output`}
+            >
+              {formatNumber(message.totalTokenCount)} tokens
+            </span>
+          ) : null}
           {!isUser ? <MessageActions message={message} onFeedback={onFeedback} /> : null}
         </div>
         {message.citations.length > 0 ? <Citations citations={message.citations} /> : null}

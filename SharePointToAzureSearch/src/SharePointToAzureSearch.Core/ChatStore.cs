@@ -48,6 +48,9 @@ public sealed record ChatMessageRecord(
     ChatMessageRole Role,
     string Content,
     IReadOnlyList<ChatCitation> Citations,
+    long InputTokenCount,
+    long OutputTokenCount,
+    long TotalTokenCount,
     ChatFeedback? Feedback,
     DateTimeOffset CreatedAtUtc);
 
@@ -63,6 +66,9 @@ public sealed record FeedbackEntry(
     string? Question,
     string Answer,
     IReadOnlyList<ChatCitation> Citations,
+    long InputTokenCount,
+    long OutputTokenCount,
+    long TotalTokenCount,
     DateTimeOffset CreatedAtUtc);
 
 /// <summary>
@@ -205,10 +211,12 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        var record = new ChatMessageRecord(Guid.NewGuid(), conversationId, role, content, citations, null, now);
         var inputTokens = usage?.InputTokens ?? 0;
         var outputTokens = usage?.OutputTokens ?? 0;
         var totalTokens = usage?.TotalTokens ?? 0;
+        var record = new ChatMessageRecord(
+            Guid.NewGuid(), conversationId, role, content, citations,
+            inputTokens, outputTokens, totalTokens, null, now);
 
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -228,6 +236,9 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
             Role = role,
             Content = content,
             CitationsJson = citations.Count == 0 ? null : JsonSerializer.Serialize(citations, Json),
+            InputTokenCount = inputTokens,
+            OutputTokenCount = outputTokens,
+            TotalTokenCount = totalTokens,
             CreatedAtUtc = now
         });
         await context.SaveChangesAsync(cancellationToken);
@@ -295,6 +306,9 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
                 m.Feedback,
                 Answer = m.Content,
                 m.CitationsJson,
+                m.InputTokenCount,
+                m.OutputTokenCount,
+                m.TotalTokenCount,
                 m.CreatedAtUtc,
                 Question = context.ChatMessages
                     .Where(q => q.ConversationId == m.ConversationId
@@ -315,6 +329,9 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
                 r.Question,
                 r.Answer,
                 ReadCitations(r.CitationsJson),
+                r.InputTokenCount,
+                r.OutputTokenCount,
+                r.TotalTokenCount,
                 r.CreatedAtUtc))
             .ToList();
 
@@ -327,6 +344,9 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
         row.Role,
         row.Content,
         ReadCitations(row.CitationsJson),
+        row.InputTokenCount,
+        row.OutputTokenCount,
+        row.TotalTokenCount,
         row.Feedback,
         row.CreatedAtUtc);
 

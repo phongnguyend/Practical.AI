@@ -91,6 +91,9 @@ public sealed class ChatAgentService(
         answer normally without searching. Keep answers concise and use Markdown for structure.
         """;
 
+    /// <summary>The built-in template used when a new persisted agent has no custom instructions yet.</summary>
+    public static string GetDefaultInstructions() => Instructions;
+
     public async Task<ChatTurn> RunStreamingAsync(
         IReadOnlyList<ChatMessageRecord> history,
         string userMessage,
