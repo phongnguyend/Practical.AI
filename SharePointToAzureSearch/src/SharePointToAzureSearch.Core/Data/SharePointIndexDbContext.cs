@@ -26,7 +26,7 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
         {
             entity.ToTable("AgentDefinitions");
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.Id).HasDefaultValueSql("NEWSEQUENTIALID()").ValueGeneratedOnAdd();
             entity.Property(x => x.Name).HasMaxLength(100).IsRequired();
             entity.Property(x => x.Instructions).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasPrecision(7);

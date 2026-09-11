@@ -54,7 +54,6 @@ public sealed class EfAgentStore(IDbContextFactory<SharePointIndexDbContext> con
         var now = DateTimeOffset.UtcNow;
         var entity = new AgentDefinitionEntity
         {
-            Id = Guid.NewGuid(),
             Name = name,
             Instructions = instructions,
             CreatedAtUtc = now,
