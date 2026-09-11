@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import {
   Ban,
-  CalendarClock,
   Check,
   CircleCheck,
   CircleX,
@@ -30,6 +29,7 @@ import { formatDateTime, formatRelative } from '../lib/format'
 import { useAsync } from '../lib/useAsync'
 
 const STATUS_BADGES: Record<SubscriptionStatus, { className: string; label: string }> = {
+  Missing: { className: 'badge warning', label: 'Missing from Graph' },
   Active: { className: 'badge good', label: 'Active' },
   ExpiringSoon: { className: 'badge warning', label: 'Expiring soon' },
   Expired: { className: 'badge critical', label: 'Expired' },
@@ -38,6 +38,7 @@ const STATUS_BADGES: Record<SubscriptionStatus, { className: string; label: stri
 export default function SubscriptionsPage() {
   const overview = useAsync((signal) => listSubscriptions(signal), [])
 
+  const [subscriptionName, setSubscriptionName] = useState('')
   const [lifetimeDays, setLifetimeDays] = useState(28)
   const [notificationUrl, setNotificationUrl] = useState('')
   // null when the dialog is closed; a subscription when editing one, 'new' when creating.
@@ -48,7 +49,6 @@ export default function SubscriptionsPage() {
   const [notice, setNotice] = useState<string | null>(null)
 
   const data = overview.data
-  const managed = data?.items.filter((item) => item.isManaged) ?? []
   const isCreating = editing === 'new'
   const target = editing === 'new' ? null : editing
 
@@ -65,11 +65,15 @@ export default function SubscriptionsPage() {
         item.id !== target?.id && item.notificationUrl.toLowerCase() === trimmedUrl.toLowerCase(),
     ) ??
       false)
-  // The default subscription is the worker's, so only its lifetime is editable here.
-  const urlLocked = target?.isDefault ?? false
-  const urlChanged = target !== null && trimmedUrl !== '' && trimmedUrl !== target.notificationUrl
+  const nameLocked = target?.isDefault ?? false
+  const urlChanged =
+    target !== null &&
+    target.id !== null &&
+    trimmedUrl !== '' &&
+    trimmedUrl !== target.notificationUrl
 
   const openDialog = (subscription: SubscriptionView | 'new') => {
+    setSubscriptionName(subscription === 'new' ? '' : subscription.name)
     setLifetimeDays(data?.lifetimeDays ?? 28)
     // Editing shows the subscription's own URL; creating leaves the field empty.
     setNotificationUrl(subscription === 'new' ? '' : subscription.notificationUrl)
@@ -103,14 +107,25 @@ export default function SubscriptionsPage() {
     setNotice(null)
     try {
       if (target === null) {
-        await createSubscription(lifetimeDays, notificationUrl)
+        await createSubscription(subscriptionName, lifetimeDays, notificationUrl)
         setNotice('Subscription created.')
       } else {
-        const result = await updateSubscription(target.id, lifetimeDays, notificationUrl)
+        const updateId = target.id ?? target.databaseId
+        if (!updateId) {
+          throw new Error('This subscription has no database or Microsoft Graph ID.')
+        }
+        const result = await updateSubscription(
+          updateId,
+          subscriptionName,
+          lifetimeDays,
+          notificationUrl,
+        )
         setNotice(
-          result.warning ??
+          target.id === null
+            ? `${result.subscription.name} Graph subscription created — its ID is ${result.subscription.id}.`
+            : result.warning ??
             (result.replaced
-              ? `Notification URL changed. Graph cannot move one, so the subscription was replaced — its ID is now ${result.subscription.id}.`
+              ? `Name or notification URL changed, so the subscription was replaced — its ID is now ${result.subscription.id}.`
               : 'Subscription updated.'),
         )
       }
@@ -160,79 +175,48 @@ export default function SubscriptionsPage() {
         </div>
       ) : null}
 
-      {data ? (
-        <>
-          <div className="card">
-            <div className="card-head">
-              <h2>
-                <CalendarClock size={15} />
-                What the worker would create
-              </h2>
-              <span
-                className={data.renewalEnabled ? 'badge good' : 'badge warning'}
-                title={
-                  data.renewalEnabled
-                    ? `Checked every ${data.renewalCheckHours} h, renewed within ${data.renewalThresholdDays} days of expiry`
-                    : 'SharePoint:SubscriptionRenewalEnabled is false — nothing renews these automatically'
-                }
-              >
-                {data.renewalEnabled ? <RotateCw size={12} /> : <Ban size={12} />}
-                {data.renewalEnabled ? 'Auto-renewal on' : 'Auto-renewal off'}
-              </span>
-            </div>
-            <div className="card-body">
-              <dl className="detail-grid">
-                <dt>Resource</dt>
-                <dd className="mono">{data.expectedResource}</dd>
-
-                <dt>Notification URL</dt>
-                <dd className="mono">{data.expectedNotificationUrl || '(not configured)'}</dd>
-
-                <dt>Default lifetime</dt>
-                <dd>
-                  {data.lifetimeDays} days
-                  {data.renewalEnabled ? (
-                    <span style={{ color: 'var(--text-muted)' }}>
-                      {' '}
-                      — checked every {data.renewalCheckHours} h, renewed inside{' '}
-                      {data.renewalThresholdDays} days of expiry
-                    </span>
-                  ) : null}
-                </dd>
-              </dl>
-            </div>
-          </div>
-
-          {managed.length === 0 ? (
-            <div className="banner warning" role="status">
-              <TriangleAlert size={17} color="var(--warning)" style={{ marginTop: 2 }} />
-              <div style={{ flex: 1 }}>
-                <div className="title">No subscription for this drive</div>
-                Change notifications are not reaching this deployment. The scheduled synchronization
-                still picks changes up on its own interval.
-              </div>
-            </div>
-          ) : null}
-
-        </>
-      ) : null}
-
       {data && data.items.length > 0 ? (
         <div className="stack">
+          <div className="row spread">
+            <h2
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 7,
+                margin: 0,
+                fontSize: 15,
+              }}
+            >
+              <Webhook size={15} />
+              All subscriptions
+            </h2>
+            <span className="badge">{data.items.length}</span>
+          </div>
           {data.items.map((item) => (
             <SubscriptionCard
-              key={item.id}
+              key={item.id ?? item.databaseId ?? `database:${item.name}`}
               item={item}
               days={data.lifetimeDays}
+              renewalEnabled={data.renewalEnabled}
+              renewalCheckHours={data.renewalCheckHours}
+              renewalThresholdDays={data.renewalThresholdDays}
               busy={busy}
-              onEdit={() => openDialog(item)}
-              onRenew={() =>
-                run(`renew:${item.id}`, 'Subscription renewed.', () =>
-                  renewSubscription(item.id, data.lifetimeDays),
-                )
+              onEdit={item.isTracked ? () => openDialog(item) : undefined}
+              onRenew={
+                item.id === null
+                  ? undefined
+                  : () =>
+                      run(`renew:${item.id}`, 'Subscription renewed.', () =>
+                        renewSubscription(item.id!, data.lifetimeDays),
+                      )
               }
-              onDelete={() =>
-                run(`delete:${item.id}`, 'Subscription deleted.', () => deleteSubscription(item.id))
+              onDelete={
+                item.id === null
+                  ? undefined
+                  : () =>
+                      run(`delete:${item.id}`, 'Subscription deleted.', () =>
+                        deleteSubscription(item.id!),
+                      )
               }
             />
           ))}
@@ -260,7 +244,7 @@ export default function SubscriptionsPage() {
             </button>
             <button
               className="primary"
-              disabled={busy === 'save' || !urlIsHttps || urlTaken}
+              disabled={busy === 'save' || !subscriptionName.trim() || !urlIsHttps || urlTaken}
               onClick={save}
             >
               {isCreating ? <Plus size={14} /> : <Check size={14} />}
@@ -272,6 +256,24 @@ export default function SubscriptionsPage() {
         <div className="stack" style={{ gap: 14 }}>
           {dialogError ? <ErrorBanner message={dialogError} /> : null}
 
+          <Field
+            label="Name"
+            help={
+              nameLocked
+                ? 'The auto-renewed subscription is always named Default.'
+                : 'Saved in the database and included in authenticated Microsoft Graph clientState.'
+            }
+          >
+            <input
+              autoFocus={!nameLocked}
+              type="text"
+              value={subscriptionName}
+              readOnly={nameLocked}
+              onChange={(event) => setSubscriptionName(event.target.value)}
+              placeholder="For example: Development tunnel"
+            />
+          </Field>
+
           <Field label="Resource">
             <input type="text" className="mono" value={data?.expectedResource ?? ''} readOnly />
           </Field>
@@ -279,8 +281,8 @@ export default function SubscriptionsPage() {
           <Field
             label="Notification URL"
             help={
-              urlLocked
-                ? 'This is the default subscription, on the configured SharePoint:NotificationUrl. Change that setting to move it — the renewal service would put it back otherwise.'
+              target?.isDefault
+                ? 'Changing this URL also updates the database-backed Default subscription used by auto-renewal.'
                 : 'Where Microsoft Graph posts change notifications. It must be HTTPS, reachable from the internet, and not already used by another subscription.'
             }
           >
@@ -289,7 +291,6 @@ export default function SubscriptionsPage() {
               required
               placeholder={data?.expectedNotificationUrl || 'https://your-host/api/sharepoint/webhook'}
               value={notificationUrl}
-              readOnly={urlLocked}
               onChange={(event) => setNotificationUrl(event.target.value)}
             />
           </Field>
@@ -323,9 +324,8 @@ export default function SubscriptionsPage() {
             </Hint>
           ) : isCreating && isOverride ? (
             <Hint tone="warning" icon={<TriangleAlert size={13} color="var(--warning)" />}>
-              This differs from <span className="mono">SharePoint:NotificationUrl</span>, so the
-              renewal service will not treat the subscription as its own — it will neither renew it
-              nor count it when deciding whether to create another.
+              This differs from the database-backed Default URL, so auto-renewal will not treat this
+              subscription as the Default one.
             </Hint>
           ) : null}
         </div>
@@ -337,6 +337,9 @@ export default function SubscriptionsPage() {
 function SubscriptionCard({
   item,
   days,
+  renewalEnabled,
+  renewalCheckHours,
+  renewalThresholdDays,
   busy,
   onEdit,
   onRenew,
@@ -344,10 +347,13 @@ function SubscriptionCard({
 }: {
   item: SubscriptionView
   days: number
+  renewalEnabled: boolean
+  renewalCheckHours: number
+  renewalThresholdDays: number
   busy: string | null
-  onEdit: () => void
-  onRenew: () => void
-  onDelete: () => void
+  onEdit?: () => void
+  onRenew?: () => void
+  onDelete?: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
   const status = STATUS_BADGES[item.status]
@@ -357,33 +363,63 @@ function SubscriptionCard({
     <div className="card">
       <div className="card-head">
         <h2 style={{ minWidth: 0 }}>
-          {item.isManaged ? (
+          {item.isTracked ? (
             <ShieldCheck size={15} color="var(--good)" />
           ) : (
             <ShieldAlert size={15} color="var(--text-muted)" />
           )}
-          <span className="mono" style={{ overflowWrap: 'anywhere', fontWeight: 600 }}>
-            {item.id}
+          <span style={{ overflowWrap: 'anywhere', fontWeight: 600 }}>
+            {item.name}
           </span>
         </h2>
         <div className="row" style={{ gap: 8 }}>
           <span className={status.className}>{status.label}</span>
+          <span className={item.isTracked ? 'badge good' : 'badge'}>
+            {item.isTracked ? <CircleCheck size={11} /> : <CircleX size={11} />}
+            {item.isTracked ? 'Tracked' : 'Untracked'}
+          </span>
           {item.isDefault ? (
-            <span className="badge accent" title="On the configured SharePoint:NotificationUrl">
+            <span className="badge accent" title="Managed by the database-backed Default definition">
               <Lock size={11} />
               Default
             </span>
-          ) : (
-            <span className="badge">Additional</span>
-          )}
-          <span className="hint">expires {formatRelative(item.expirationUtc)}</span>
+          ) : null}
+          {item.expirationUtc ? (
+            <span className="hint">expires {formatRelative(item.expirationUtc)}</span>
+          ) : null}
         </div>
       </div>
 
       <div className="card-body stack" style={{ gap: 14 }}>
         <dl className="detail-grid">
+          <dt>Name</dt>
+          <dd>{item.name}</dd>
+
+          {item.isDefault ? (
+            <>
+              <dt>Default lifetime</dt>
+              <dd>{days} days</dd>
+
+              <dt>Auto-renewal</dt>
+              <dd>
+                <span className={renewalEnabled ? 'badge good' : 'badge warning'}>
+                  {renewalEnabled ? <RotateCw size={12} /> : <Ban size={12} />}
+                  {renewalEnabled ? 'On' : 'Off'}
+                </span>
+                {renewalEnabled ? (
+                  <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>
+                    checked every {renewalCheckHours} h, renewed inside {renewalThresholdDays} days
+                  </span>
+                ) : null}
+              </dd>
+            </>
+          ) : null}
+
           <dt>Expires</dt>
-          <dd>{formatDateTime(item.expirationUtc)}</dd>
+          <dd>{item.expirationUtc ? formatDateTime(item.expirationUtc) : 'No Graph subscription'}</dd>
+
+          <dt>Graph ID</dt>
+          <dd className="mono">{item.id ?? '(not created)'}</dd>
 
           <dt>Resource</dt>
           <dd>
@@ -401,19 +437,29 @@ function SubscriptionCard({
           <dd>
             <span className={item.clientStateMatches ? 'badge good' : 'badge'}>
               {item.clientStateMatches ? <CircleCheck size={12} /> : <CircleX size={12} />}
-              {item.clientStateMatches ? 'Matches configuration' : 'Different or unset'}
+              {item.id === null
+                ? 'No Graph subscription'
+                : item.clientStateMatches
+                  ? 'Matches configuration'
+                  : 'Different or unset'}
             </span>
           </dd>
         </dl>
 
         <div className="row spread">
-          <CopyButton value={item.id} label="Copy ID" />
+          {item.id ? <CopyButton value={item.id} label="Copy ID" /> : <span className="hint">Database record</span>}
           <div className="row" style={{ gap: 8 }}>
-            <button disabled={anyBusy} onClick={onRenew}>
-              <RotateCw size={14} />
-              {busy === `renew:${item.id}` ? 'Renewing…' : `Renew ${days} days`}
-            </button>
-            <button disabled={anyBusy} onClick={onEdit}>
+            {onRenew ? (
+              <button disabled={anyBusy} onClick={onRenew}>
+                <RotateCw size={14} />
+                {busy === `renew:${item.id}` ? 'Renewing…' : `Renew ${days} days`}
+              </button>
+            ) : null}
+            <button
+              disabled={anyBusy || !onEdit}
+              onClick={onEdit}
+              title={onEdit ? undefined : 'Untracked subscriptions cannot be updated.'}
+            >
               <Pencil size={14} />
               Edit
             </button>
@@ -425,7 +471,7 @@ function SubscriptionCard({
                 <Lock size={14} />
                 Delete
               </button>
-            ) : confirming ? (
+            ) : onDelete && confirming ? (
               <>
                 <button onClick={() => setConfirming(false)} disabled={anyBusy}>
                   Cancel
@@ -442,12 +488,12 @@ function SubscriptionCard({
                   {busy === `delete:${item.id}` ? 'Deleting…' : 'Confirm delete'}
                 </button>
               </>
-            ) : (
+            ) : onDelete ? (
               <button disabled={anyBusy} onClick={() => setConfirming(true)}>
                 <Trash2 size={14} />
                 Delete
               </button>
-            )}
+            ) : null}
           </div>
         </div>
       </div>

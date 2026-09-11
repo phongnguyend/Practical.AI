@@ -164,17 +164,22 @@ export type ChatStreamEvent =
   | { type: 'completed'; answer: ChatMessage; title: string }
   | { type: 'error'; message: string }
 
-export type SubscriptionStatus = 'Active' | 'ExpiringSoon' | 'Expired'
+export type SubscriptionStatus = 'Missing' | 'Active' | 'ExpiringSoon' | 'Expired'
 
 /** A Microsoft Graph webhook subscription. The client state itself is never sent to the browser. */
 export interface SubscriptionView {
-  id: string
+  id: string | null
+  /** Database ID for tracked rows; used to update a tracked row that is currently missing from Graph. */
+  databaseId: string | null
+  name: string
   resource: string
   notificationUrl: string
-  expirationUtc: string
+  expirationUtc: string | null
   clientStateMatches: boolean
   resourceMatches: boolean
   notificationUrlMatches: boolean
+  /** Has a database row associated with this Microsoft Graph subscription ID. */
+  isTracked: boolean
   isManaged: boolean
   /** On the configured SharePoint:NotificationUrl. The worker owns it, so it cannot be deleted here. */
   isDefault: boolean
@@ -183,7 +188,7 @@ export interface SubscriptionView {
 
 export interface UpdateSubscriptionResult {
   subscription: SubscriptionView
-  /** True when the notification URL changed: Graph can only express that as a new subscription. */
+  /** True when name or notification URL changed and Graph required a replacement. */
   replaced: boolean
   warning: string | null
 }

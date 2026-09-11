@@ -18,9 +18,11 @@ namespace SharePointToAzureSearch.Core.Data;
 public sealed class DatabaseMigrationHostedService(
     IDbContextFactory<SharePointIndexDbContext> contextFactory,
     IOptions<OpenAiOptions> openAiOptions,
+    IOptions<SharePointOptions> sharePointOptions,
     ILogger<DatabaseMigrationHostedService> logger) : IHostedService
 {
     private readonly string _defaultModelId = openAiOptions.Value.ChatDeployment;
+    private readonly SharePointOptions _sharePointOptions = sharePointOptions.Value;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -39,6 +41,7 @@ public sealed class DatabaseMigrationHostedService(
 
         await BackfillAgentModelIdsAsync(context, cancellationToken);
         await SeedDefaultAgentAsync(context, cancellationToken);
+        await SeedDefaultWebhookSubscriptionAsync(context, cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -90,6 +93,40 @@ public sealed class DatabaseMigrationHostedService(
         {
             // The unique index closes the race when multiple application instances start together.
             logger.LogInformation("The default agent was created by another application instance.");
+        }
+    }
+
+    private async Task SeedDefaultWebhookSubscriptionAsync(
+        SharePointIndexDbContext context,
+        CancellationToken cancellationToken)
+    {
+        if (await context.WebhookSubscriptions.AnyAsync(
+                item => item.Name == WebhookSubscriptionDefaults.Name,
+                cancellationToken))
+        {
+            logger.LogInformation("The default webhook subscription already exists.");
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        context.WebhookSubscriptions.Add(new WebhookSubscriptionEntity
+        {
+            Name = WebhookSubscriptionDefaults.Name,
+            NotificationUrl = _sharePointOptions.NotificationUrl,
+            LifetimeDays = _sharePointOptions.SubscriptionLifetimeDays,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+        });
+
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken);
+            logger.LogInformation("Created the default webhook subscription from configuration.");
+        }
+        catch (DbUpdateException exception) when (
+            exception.InnerException is SqlException { Number: 2601 or 2627 })
+        {
+            logger.LogInformation("The default webhook subscription was created by another application instance.");
         }
     }
 }

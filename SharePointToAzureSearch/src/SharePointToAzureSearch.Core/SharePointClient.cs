@@ -406,11 +406,13 @@ public sealed class SharePointClient(
     /// <c>SharePoint:NotificationUrl</c> for this one subscription, which is what lets an operator point
     /// a subscription at a tunnel or a replacement host without redeploying; omit it for the configured
     /// value. Microsoft Graph calls the URL to validate it before the subscription is created, so it has
-    /// to be reachable from the internet at the time of the call.
+    /// to be reachable from the internet at the time of the call. <paramref name="clientState"/> carries
+    /// the authenticated name used to recognize the subscription later.
     /// </summary>
     public async Task<GraphSubscription> CreateSubscriptionAsync(
         DateTimeOffset expiration,
         string? notificationUrl,
+        string clientState,
         CancellationToken cancellationToken)
     {
         try
@@ -424,7 +426,7 @@ public sealed class SharePointClient(
                     : notificationUrl,
                 Resource = $"drives/{driveId}/root",
                 ExpirationDateTime = expiration,
-                ClientState = _options.ClientState,
+                ClientState = clientState,
                 LatestSupportedTlsVersion = "v1_2"
             }, cancellationToken: cancellationToken)
                 ?? throw new InvalidDataException("Microsoft Graph returned an empty subscription response.");

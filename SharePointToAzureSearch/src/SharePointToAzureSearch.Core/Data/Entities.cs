@@ -10,6 +10,17 @@ public sealed class AgentDefinitionEntity
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }
 
+public sealed class WebhookSubscriptionEntity
+{
+    public Guid Id { get; set; }
+    public string? GraphSubscriptionId { get; set; }
+    public string Name { get; set; } = "";
+    public string NotificationUrl { get; set; } = "";
+    public int LifetimeDays { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
 /// <summary>
 /// One row of the delta-checkpoint table: where the next delta pass for a drive resumes from. Maps
 /// <see cref="DeltaCheckpoint"/> plus the timestamp the worker last wrote it.

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SharePointToAzureSearch.Core.Data;
 
@@ -11,9 +12,11 @@ using SharePointToAzureSearch.Core.Data;
 namespace SharePointToAzureSearch.Core.Migrations
 {
     [DbContext(typeof(SharePointIndexDbContext))]
-    partial class SharePointIndexDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260911123000_AddWebhookSubscriptions")]
+    partial class AddWebhookSubscriptions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -266,10 +269,6 @@ namespace SharePointToAzureSearch.Core.Migrations
                         .HasPrecision(7)
                         .HasColumnType("datetimeoffset(7)");
 
-                    b.Property<string>("GraphSubscriptionId")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
                     b.Property<int>("LifetimeDays")
                         .HasColumnType("int");
 
@@ -288,10 +287,6 @@ namespace SharePointToAzureSearch.Core.Migrations
                         .HasColumnType("datetimeoffset(7)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("GraphSubscriptionId")
-                        .IsUnique()
-                        .HasFilter("[GraphSubscriptionId] IS NOT NULL");
 
                     b.HasIndex("Name")
                         .IsUnique();

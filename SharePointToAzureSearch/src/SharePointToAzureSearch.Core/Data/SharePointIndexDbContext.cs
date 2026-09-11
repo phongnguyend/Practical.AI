@@ -15,6 +15,7 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
     private const int IdentifierLength = 200;
 
     public DbSet<AgentDefinitionEntity> AgentDefinitions => Set<AgentDefinitionEntity>();
+    public DbSet<WebhookSubscriptionEntity> WebhookSubscriptions => Set<WebhookSubscriptionEntity>();
     public DbSet<DeltaStateEntity> DeltaState => Set<DeltaStateEntity>();
     public DbSet<IndexedFileEntity> IndexedFiles => Set<IndexedFileEntity>();
     public DbSet<ChatConversationEntity> ChatConversations => Set<ChatConversationEntity>();
@@ -33,6 +34,22 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
             entity.Property(x => x.CreatedAtUtc).HasPrecision(7);
             entity.Property(x => x.UpdatedAtUtc).HasPrecision(7);
             entity.HasIndex(x => x.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<WebhookSubscriptionEntity>(entity =>
+        {
+            entity.ToTable("WebhookSubscriptions");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasDefaultValueSql("NEWSEQUENTIALID()").ValueGeneratedOnAdd();
+            entity.Property(x => x.GraphSubscriptionId).HasMaxLength(200);
+            entity.Property(x => x.Name).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.NotificationUrl).HasMaxLength(2000).IsRequired();
+            entity.Property(x => x.CreatedAtUtc).HasPrecision(7);
+            entity.Property(x => x.UpdatedAtUtc).HasPrecision(7);
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.HasIndex(x => x.GraphSubscriptionId)
+                .IsUnique()
+                .HasFilter("[GraphSubscriptionId] IS NOT NULL");
         });
 
         modelBuilder.Entity<DeltaStateEntity>(entity =>

@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
@@ -52,7 +51,7 @@ app.MapPost("/api/sharepoint/webhook", async (
 
     foreach (var notification in envelope.Value)
     {
-        if (!SecureEquals(notification.ClientState, options.Value.ClientState))
+        if (!SubscriptionClientState.IsValid(notification.ClientState, options.Value.ClientState))
         {
             logger.LogWarning("Ignored a SharePoint notification with an invalid clientState.");
             continue;
@@ -138,13 +137,23 @@ app.MapPost("/api/subscriptions", async (
     SubscriptionManager subscriptions,
     CancellationToken cancellationToken) =>
 {
+    var name = string.IsNullOrWhiteSpace(body?.Name) ? "Additional" : body.Name.Trim();
+    if (string.Equals(name, WebhookSubscriptionDefaults.Name, StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.BadRequest(new { error = "'Default' is reserved for the auto-renewed subscription." });
+    }
+    if (!subscriptions.IsValidName(name))
+    {
+        return Results.BadRequest(new { error = "'name' is too long for Microsoft Graph clientState." });
+    }
+
     var notificationUrl = string.IsNullOrWhiteSpace(body?.NotificationUrl) ? null : body!.NotificationUrl!.Trim();
     if (notificationUrl is not null && !SubscriptionManager.IsValidNotificationUrl(notificationUrl))
     {
         return Results.BadRequest(new { error = NotificationUrlError });
     }
 
-    return await CallGraphAsync(() => subscriptions.CreateAsync(body?.Days, notificationUrl, cancellationToken));
+    return await CallGraphAsync(() => subscriptions.CreateAsync(name, body?.Days, notificationUrl, cancellationToken));
 });
 
 app.MapPost("/api/subscriptions/{id}/renew", (
@@ -160,13 +169,19 @@ app.MapPut("/api/subscriptions/{id}", async (
     SubscriptionManager subscriptions,
     CancellationToken cancellationToken) =>
 {
+    var name = body?.Name?.Trim();
+    if (!string.IsNullOrWhiteSpace(name) && !subscriptions.IsValidName(name))
+    {
+        return Results.BadRequest(new { error = "'name' is too long for Microsoft Graph clientState." });
+    }
+
     var notificationUrl = string.IsNullOrWhiteSpace(body?.NotificationUrl) ? null : body!.NotificationUrl!.Trim();
     if (notificationUrl is not null && !SubscriptionManager.IsValidNotificationUrl(notificationUrl))
     {
         return Results.BadRequest(new { error = NotificationUrlError });
     }
 
-    return await CallGraphAsync(() => subscriptions.UpdateAsync(id, body?.Days, notificationUrl, cancellationToken));
+    return await CallGraphAsync(() => subscriptions.UpdateAsync(id, name, body?.Days, notificationUrl, cancellationToken));
 });
 
 app.MapDelete("/api/subscriptions/{id}", (
@@ -471,6 +486,10 @@ static async Task<IResult> CallGraphAsync<T>(Func<Task<T>> call)
     {
         return Results.Conflict(new { error = ex.Message });
     }
+    catch (DuplicateSubscriptionNameException ex)
+    {
+        return Results.Conflict(new { error = ex.Message });
+    }
     catch (ProtectedSubscriptionException ex)
     {
         return Results.BadRequest(new { error = ex.Message });
@@ -511,18 +530,6 @@ static async Task<IResult> SearchAsync(
     var request = new SearchQueryRequest(payload.Query, payload.UserId, payload.Top, payload.Skip);
     var results = await store.SearchAsync(mode, request, cancellationToken);
     return Results.Ok(results);
-}
-
-static bool SecureEquals(string? left, string right)
-{
-    if (left is null)
-    {
-        return false;
-    }
-
-    var leftBytes = Encoding.UTF8.GetBytes(left);
-    var rightBytes = Encoding.UTF8.GetBytes(right);
-    return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
 }
 
 static string? ValidateAgentDefinition(string name, string modelId, string instructions)
@@ -576,7 +583,7 @@ public sealed record SubscriptionLifetime(int? Days);
 /// use the configured value. A URL other than the configured one produces a subscription the renewal
 /// service does not treat as its own.
 /// </summary>
-public sealed record CreateSubscriptionRequest(int? Days, string? NotificationUrl);
+public sealed record CreateSubscriptionRequest(string? Name, int? Days, string? NotificationUrl);
 
 /// <summary>
 /// A new conversation. <see cref="UserId"/> optionally restricts search permissions, while a null or

@@ -6,6 +6,7 @@ import {
   Bot,
   Check,
   Copy,
+  Cpu,
   ExternalLink,
   GitBranch,
   MessageSquare,
@@ -348,6 +349,12 @@ export default function ChatPage() {
                 <span className="badge accent" title="Agent assigned to this conversation">
                   <Bot size={12} />
                   {activeAgent?.name ?? 'Agent unavailable'}
+                </span>
+              ) : null}
+              {active ? (
+                <span className="badge" title="Model ID used by the current agent">
+                  <Cpu size={12} />
+                  {activeAgent?.modelId ?? (agents.loading ? 'Loading model…' : 'Model unavailable')}
                 </span>
               ) : null}
               {active?.userId ? (

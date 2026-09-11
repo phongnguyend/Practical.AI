@@ -189,6 +189,7 @@ public static class DependencyInjection
             builder.UseSqlServer(options.ConnectionString, sql => sql.CommandTimeout(options.CommandTimeoutSeconds));
         });
         services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<SharePointIndexDbContext>>().CreateDbContext());
+        services.AddSingleton<IWebhookSubscriptionStore, EfWebhookSubscriptionStore>();
 
         if (configuration.GetValue($"{SqlServerOptions.SectionName}:{nameof(SqlServerOptions.AutoMigrate)}", true))
         {

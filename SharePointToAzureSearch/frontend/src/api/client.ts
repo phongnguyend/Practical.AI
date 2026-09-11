@@ -282,6 +282,7 @@ export function listSubscriptions(signal?: AbortSignal): Promise<SubscriptionOve
  * `notificationUrl` uses its configured `SharePoint:NotificationUrl`.
  */
 export function createSubscription(
+  name: string,
   days?: number,
   notificationUrl?: string,
 ): Promise<SubscriptionView> {
@@ -289,6 +290,7 @@ export function createSubscription(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      name: name.trim(),
       days: days ?? null,
       notificationUrl: notificationUrl?.trim() || null,
     }),
@@ -304,18 +306,19 @@ export function renewSubscription(id: string, days?: number): Promise<Subscripti
 }
 
 /**
- * Changes a subscription's lifetime and, when `notificationUrl` differs, its endpoint. Graph cannot
+ * Changes a subscription's settings. A new name or URL requires replacement because Graph only lets
  * PATCH a URL, so the API replaces the subscription — the result says whether it did.
  */
 export function updateSubscription(
   id: string,
+  name: string,
   days: number,
   notificationUrl: string,
 ): Promise<UpdateSubscriptionResult> {
   return request<UpdateSubscriptionResult>(`/api/subscriptions/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ days, notificationUrl: notificationUrl.trim() || null }),
+    body: JSON.stringify({ name: name.trim(), days, notificationUrl: notificationUrl.trim() || null }),
   })
 }
 
