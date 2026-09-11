@@ -12,16 +12,25 @@ public sealed record AgentDefinition(
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
 
+public static class AgentDefaults
+{
+    public const string Name = "Default";
+}
+
 public interface IAgentStore
 {
     Task<IReadOnlyList<AgentDefinition>> ListAsync(CancellationToken cancellationToken);
     Task<AgentDefinition?> GetAsync(Guid id, CancellationToken cancellationToken);
+    Task<AgentDefinition?> GetByNameAsync(string name, CancellationToken cancellationToken);
     Task<AgentDefinition> CreateAsync(string name, string instructions, CancellationToken cancellationToken);
     Task<AgentDefinition?> UpdateAsync(Guid id, string name, string instructions, CancellationToken cancellationToken);
 }
 
 public sealed class AgentNameConflictException(string name)
     : Exception($"An agent named '{name}' already exists.");
+
+public sealed class DefaultAgentNameChangeException()
+    : Exception("The default agent's name cannot be changed.");
 
 /// <summary>Stores agent definitions in the application's SQL Server database.</summary>
 public sealed class EfAgentStore(IDbContextFactory<SharePointIndexDbContext> contextFactory) : IAgentStore
@@ -42,6 +51,16 @@ public sealed class EfAgentStore(IDbContextFactory<SharePointIndexDbContext> con
         return await context.AgentDefinitions
             .AsNoTracking()
             .Where(a => a.Id == id)
+            .Select(a => new AgentDefinition(a.Id, a.Name, a.Instructions, a.CreatedAtUtc, a.UpdatedAtUtc))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task<AgentDefinition?> GetByNameAsync(string name, CancellationToken cancellationToken)
+    {
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await context.AgentDefinitions
+            .AsNoTracking()
+            .Where(a => a.Name == name)
             .Select(a => new AgentDefinition(a.Id, a.Name, a.Instructions, a.CreatedAtUtc, a.UpdatedAtUtc))
             .FirstOrDefaultAsync(cancellationToken);
     }
@@ -91,6 +110,12 @@ public sealed class EfAgentStore(IDbContextFactory<SharePointIndexDbContext> con
         if (entity is null)
         {
             return null;
+        }
+
+        if (string.Equals(entity.Name, AgentDefaults.Name, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(entity.Name, name, StringComparison.Ordinal))
+        {
+            throw new DefaultAgentNameChangeException();
         }
 
         if (await context.AgentDefinitions.AnyAsync(a => a.Id != id && a.Name == name, cancellationToken))

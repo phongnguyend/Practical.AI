@@ -16,7 +16,13 @@ import { listFeedback } from '../api/client'
 import type { ChatFeedback, FeedbackEntry } from '../api/types'
 import { Empty, ErrorBanner, Field, LoadingBar, Pagination, StatTile } from '../components/ui'
 import { FileTypeIcon } from '../components/FileTypeIcon'
-import { folderLabel, formatDateTime, formatNumber, formatRelative } from '../lib/format'
+import {
+  folderLabel,
+  formatDateTime,
+  formatNumber,
+  formatRelative,
+  formatTokenUsage,
+} from '../lib/format'
 import { useAsync, useDebounced } from '../lib/useAsync'
 
 type Filter = 'all' | ChatFeedback
@@ -191,10 +197,12 @@ function FeedbackCard({ entry }: { entry: FeedbackEntry }) {
         </h2>
         <span
           className="hint"
-          title={`${formatDateTime(entry.createdAtUtc)} · ${formatNumber(entry.inputTokenCount)} input + ${formatNumber(entry.outputTokenCount)} output`}
+          title={formatDateTime(entry.createdAtUtc)}
         >
           {formatRelative(entry.createdAtUtc)}
-          {entry.totalTokenCount > 0 ? ` · ${formatNumber(entry.totalTokenCount)} tokens` : ''}
+          {entry.totalTokenCount > 0
+            ? ` · ${formatTokenUsage(entry.totalTokenCount, entry.inputTokenCount, entry.outputTokenCount)}`
+            : ''}
         </span>
       </div>
 

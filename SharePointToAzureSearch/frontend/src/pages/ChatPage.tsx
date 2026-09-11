@@ -15,31 +15,34 @@ import {
   ThumbsUp,
   Trash2,
   User,
+  X,
 } from 'lucide-react'
 import {
   createConversation,
   deleteConversation,
   getThread,
+  listAgents,
   listConversations,
   sendChatMessage,
   setMessageFeedback,
 } from '../api/client'
 import type { ChatConversation, ChatFeedback, ChatMessage } from '../api/types'
-import { Empty, ErrorBanner, LoadingBar } from '../components/ui'
+import { Empty, ErrorBanner, Field, LoadingBar, Modal } from '../components/ui'
 import { FileTypeIcon } from '../components/FileTypeIcon'
 import {
   folderLabel,
   formatDateTime,
   formatMessageTime,
-  formatNumber,
   formatRelative,
   formatScore,
+  formatTokenUsage,
 } from '../lib/format'
 import { copyText } from '../lib/clipboard'
 import { useAsync } from '../lib/useAsync'
 
 export default function ChatPage() {
   const conversations = useAsync((signal) => listConversations(signal), [])
+  const agents = useAsync((signal) => listAgents(signal), [])
   // The open conversation is in the URL, so a link from elsewhere — the Feedback page — can open the
   // one it is pointing at rather than dropping the reader into whichever is most recent.
   const [params, setParams] = useSearchParams()
@@ -51,10 +54,18 @@ export default function ChatPage() {
   const [agentStatus, setAgentStatus] = useState('Thinking…')
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [showNewConversation, setShowNewConversation] = useState(false)
+  const [selectedAgentId, setSelectedAgentId] = useState('')
+  const [creatingConversation, setCreatingConversation] = useState(false)
   const threadRef = useRef<HTMLDivElement>(null)
 
   const list = conversations.data ?? []
   const active = list.find((item) => item.id === activeId) ?? null
+  const activeAgent = active
+    ? (agents.data ?? []).find((item) =>
+        active.agentId ? item.id === active.agentId : item.name.toLowerCase() === 'default',
+      )
+    : null
 
   const open = (id: string | null) => {
     setActiveId(id)
@@ -132,14 +143,24 @@ export default function ChatPage() {
     return () => clearTimeout(timer)
   }, [highlighted])
 
+  const openNewChat = () => {
+    setSelectedAgentId('')
+    setError(null)
+    setShowNewConversation(true)
+  }
+
   const newChat = async () => {
     setError(null)
+    setCreatingConversation(true)
     try {
-      const created = await createConversation()
+      const created = await createConversation({ agentId: selectedAgentId || null })
       conversations.reload()
       open(created.id)
+      setShowNewConversation(false)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setCreatingConversation(false)
     }
   }
 
@@ -270,7 +291,7 @@ export default function ChatPage() {
               <MessageSquare size={15} />
               Conversations
             </h2>
-            <button className="primary" onClick={newChat}>
+            <button className="primary" onClick={openNewChat}>
               <Plus size={14} />
               New
             </button>
@@ -306,13 +327,21 @@ export default function ChatPage() {
               <Bot size={15} />
               {active?.title ?? 'New chat'}
             </h2>
-            {active?.userId ? (
-              <span className="badge accent" title="Searches are filtered to this user's permissions">
-                as {active.userId}
-              </span>
-            ) : (
-              <span className="hint">Searching the whole index, unfiltered</span>
-            )}
+            <div className="row" style={{ gap: 8 }}>
+              {active ? (
+                <span className="badge accent" title="Agent assigned to this conversation">
+                  <Bot size={12} />
+                  {activeAgent?.name ?? 'Agent unavailable'}
+                </span>
+              ) : null}
+              {active?.userId ? (
+                <span className="badge accent" title="Searches are filtered to this user's permissions">
+                  as {active.userId}
+                </span>
+              ) : (
+                <span className="hint">Searching the whole index, unfiltered</span>
+              )}
+            </div>
           </div>
 
           <div className="chat-thread" ref={threadRef}>
@@ -356,6 +385,54 @@ export default function ChatPage() {
           </div>
         </section>
       </div>
+
+      <Modal
+        open={showNewConversation}
+        title="New conversation"
+        icon={<MessageSquare size={17} />}
+        onClose={() => setShowNewConversation(false)}
+        footer={
+          <>
+            <button disabled={creatingConversation} onClick={() => setShowNewConversation(false)}>
+              <X size={14} />
+              Cancel
+            </button>
+            <button
+              className="primary"
+              disabled={creatingConversation}
+              onClick={() => void newChat()}
+            >
+              <Plus size={14} />
+              {creatingConversation ? 'Creatingâ€¦' : 'Create conversation'}
+            </button>
+          </>
+        }
+      >
+        <div className="stack">
+          {error ? <ErrorBanner message={error} /> : null}
+          {agents.error ? <ErrorBanner message={agents.error} onRetry={agents.reload} /> : null}
+          <Field
+            label="Agent"
+            help="Optional. If none is selected, this conversation uses the Default agent."
+          >
+            <select
+              autoFocus
+              value={selectedAgentId}
+              disabled={agents.loading || creatingConversation}
+              onChange={(event) => setSelectedAgentId(event.target.value)}
+            >
+              <option value="">Default agent</option>
+              {(agents.data ?? [])
+                .filter((agent) => agent.name.toLowerCase() !== 'default')
+                .map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
+            </select>
+          </Field>
+        </div>
+      </Modal>
     </div>
   )
 }
@@ -382,8 +459,13 @@ function ConversationRow({
       <button className="chat-conversation-open" onClick={onOpen} title={item.title}>
         <span className="chat-conversation-title">{item.title}</span>
         <span className="chat-conversation-meta">
-          {formatRelative(item.updatedAtUtc)} · {item.messageCount}{' '}
-          {item.messageCount === 1 ? 'message' : 'messages'} · {formatNumber(item.totalTokenCount)} tokens
+          <span className="chat-conversation-meta-line">
+            {formatRelative(item.updatedAtUtc)} · {item.messageCount}{' '}
+            {item.messageCount === 1 ? 'message' : 'messages'}
+          </span>
+          <span className="chat-conversation-token-usage">
+            {formatTokenUsage(item.totalTokenCount, item.inputTokenCount, item.outputTokenCount)}
+          </span>
         </span>
       </button>
       {confirming ? (
@@ -436,11 +518,12 @@ function MessageBubble({
             {formatMessageTime(message.createdAtUtc)}
           </span>
           {!isUser && message.totalTokenCount > 0 ? (
-            <span
-              className="chat-time"
-              title={`${formatNumber(message.inputTokenCount)} input + ${formatNumber(message.outputTokenCount)} output`}
-            >
-              {formatNumber(message.totalTokenCount)} tokens
+            <span className="chat-time">
+              {formatTokenUsage(
+                message.totalTokenCount,
+                message.inputTokenCount,
+                message.outputTokenCount,
+              )}
             </span>
           ) : null}
           {!isUser ? <MessageActions message={message} onFeedback={onFeedback} /> : null}

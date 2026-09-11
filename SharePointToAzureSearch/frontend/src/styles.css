@@ -918,6 +918,22 @@ button.ghost:hover:not(:disabled) {
   margin-top: 2px;
 }
 
+.chat-conversation-meta-line,
+.chat-conversation-token-usage {
+  display: block;
+}
+
+.chat-conversation-meta-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-conversation-token-usage {
+  margin-top: 1px;
+  overflow-wrap: anywhere;
+}
+
 /* The delete affordance stays out of the way until the row is hovered or focused within. */
 .chat-conversation-delete {
   opacity: 0;

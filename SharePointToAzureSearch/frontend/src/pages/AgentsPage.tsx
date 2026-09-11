@@ -23,6 +23,8 @@ export default function AgentsPage() {
   const [busy, setBusy] = useState(false)
   const [dialogError, setDialogError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const editingDefault =
+    editing !== null && editing !== 'new' && editing.name.toLowerCase() === 'default'
 
   const openCreate = () => {
     setName('')
@@ -196,12 +198,20 @@ export default function AgentsPage() {
           </div>
 
           <div className="agent-editor-name-row">
-            <Field label="Agent name" help="Must be unique. Maximum 100 characters.">
+            <Field
+              label="Agent name"
+              help={
+                editingDefault
+                  ? 'The default agent name is fixed.'
+                  : 'Must be unique. Maximum 100 characters.'
+              }
+            >
               <input
-                autoFocus
+                autoFocus={!editingDefault}
                 type="text"
                 maxLength={100}
                 value={name}
+                disabled={editingDefault}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="For example: Contract reviewer"
               />

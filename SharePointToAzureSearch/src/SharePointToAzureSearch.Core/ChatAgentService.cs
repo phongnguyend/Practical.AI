@@ -98,6 +98,7 @@ public sealed class ChatAgentService(
         IReadOnlyList<ChatMessageRecord> history,
         string userMessage,
         string? userId,
+        string instructions,
         Func<string, CancellationToken, ValueTask> onText,
         Func<string, CancellationToken, ValueTask> onStatus,
         CancellationToken cancellationToken)
@@ -139,7 +140,7 @@ public sealed class ChatAgentService(
             Name = "SharePointSearchAgent",
             ChatOptions = new ChatOptions
             {
-                Instructions = Instructions,
+                Instructions = instructions,
                 Tools = tools,
             },
         });

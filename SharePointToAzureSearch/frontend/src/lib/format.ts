@@ -20,6 +20,11 @@ export function formatNumber(value: number | null | undefined): string {
   return value === null || value === undefined ? '—' : NUMBER.format(value)
 }
 
+/** A consistent visible breakdown for model usage on conversations and individual responses. */
+export function formatTokenUsage(total: number, input: number, output: number): string {
+  return `${formatNumber(total)} tokens (in: ${formatNumber(input)}, out: ${formatNumber(output)})`
+}
+
 export function formatBytes(value: number | null | undefined): string {
   if (value === null || value === undefined) return '—'
   if (value < 1024) return `${value} B`

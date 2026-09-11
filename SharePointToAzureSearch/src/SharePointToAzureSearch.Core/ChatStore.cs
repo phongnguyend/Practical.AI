@@ -9,6 +9,7 @@ public sealed record ChatConversation(
     Guid Id,
     string Title,
     string? UserId,
+    Guid? AgentId,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
     int MessageCount,
@@ -86,7 +87,11 @@ public interface IChatStore
 {
     Task<IReadOnlyList<ChatConversation>> ListConversationsAsync(CancellationToken cancellationToken);
     Task<ChatConversation?> GetConversationAsync(Guid id, CancellationToken cancellationToken);
-    Task<ChatConversation> CreateConversationAsync(string title, string? userId, CancellationToken cancellationToken);
+    Task<ChatConversation> CreateConversationAsync(
+        string title,
+        string? userId,
+        Guid agentId,
+        CancellationToken cancellationToken);
     Task RenameConversationAsync(Guid id, string title, CancellationToken cancellationToken);
 
     /// <summary>Removes a conversation and every message in it. Returns false when it was already gone.</summary>
@@ -138,7 +143,7 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
             .AsNoTracking()
             .OrderByDescending(c => c.UpdatedAtUtc)
             .Select(c => new ChatConversation(
-                c.Id, c.Title, c.UserId, c.CreatedAtUtc, c.UpdatedAtUtc, c.Messages.Count,
+                c.Id, c.Title, c.UserId, c.AgentId, c.CreatedAtUtc, c.UpdatedAtUtc, c.Messages.Count,
                 c.InputTokenCount, c.OutputTokenCount, c.TotalTokenCount))
             .ToListAsync(cancellationToken);
     }
@@ -150,15 +155,20 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
             .AsNoTracking()
             .Where(c => c.Id == id)
             .Select(c => new ChatConversation(
-                c.Id, c.Title, c.UserId, c.CreatedAtUtc, c.UpdatedAtUtc, c.Messages.Count,
+                c.Id, c.Title, c.UserId, c.AgentId, c.CreatedAtUtc, c.UpdatedAtUtc, c.Messages.Count,
                 c.InputTokenCount, c.OutputTokenCount, c.TotalTokenCount))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
-    public async Task<ChatConversation> CreateConversationAsync(string title, string? userId, CancellationToken cancellationToken)
+    public async Task<ChatConversation> CreateConversationAsync(
+        string title,
+        string? userId,
+        Guid agentId,
+        CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        var conversation = new ChatConversation(Guid.NewGuid(), Truncate(title, 200), userId, now, now, 0, 0, 0, 0);
+        var conversation = new ChatConversation(
+            Guid.NewGuid(), Truncate(title, 200), userId, agentId, now, now, 0, 0, 0, 0);
 
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
         context.ChatConversations.Add(new ChatConversationEntity
@@ -166,6 +176,7 @@ public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> cont
             Id = conversation.Id,
             Title = conversation.Title,
             UserId = userId,
+            AgentId = agentId,
             CreatedAtUtc = now,
             UpdatedAtUtc = now
         });

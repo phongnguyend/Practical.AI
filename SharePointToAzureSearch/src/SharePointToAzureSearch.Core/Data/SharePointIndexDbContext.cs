@@ -75,6 +75,11 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
             entity.Property(x => x.CreatedAtUtc).HasPrecision(7);
             entity.Property(x => x.UpdatedAtUtc).HasPrecision(7);
 
+            entity.HasOne(x => x.Agent)
+                .WithMany()
+                .HasForeignKey(x => x.AgentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             // The sidebar lists conversations most recently used first.
             entity.HasIndex(x => x.UpdatedAtUtc).IsDescending();
         });

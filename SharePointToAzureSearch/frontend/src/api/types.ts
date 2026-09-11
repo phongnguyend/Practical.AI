@@ -83,6 +83,8 @@ export interface ChatConversation {
   title: string
   /** When set, every search the assistant runs in this conversation is filtered to that user. */
   userId: string | null
+  /** The persisted agent whose instructions govern this conversation. Null means the default agent. */
+  agentId: string | null
   createdAtUtc: string
   updatedAtUtc: string
   messageCount: number

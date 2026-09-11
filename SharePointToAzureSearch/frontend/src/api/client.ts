@@ -106,11 +106,18 @@ export function listConversations(signal?: AbortSignal): Promise<ChatConversatio
   return request<ChatConversation[]>('/api/chat/conversations', { signal })
 }
 
-export function createConversation(userId?: string): Promise<ChatConversation> {
+export function createConversation(options?: {
+  userId?: string | null
+  agentId?: string | null
+}): Promise<ChatConversation> {
   return request<ChatConversation>('/api/chat/conversations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: null, userId: userId?.trim() || null }),
+    body: JSON.stringify({
+      title: null,
+      userId: options?.userId?.trim() || null,
+      agentId: options?.agentId || null,
+    }),
   })
 }
 

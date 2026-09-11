@@ -245,6 +245,10 @@ app.MapPut("/api/agents/{id:guid}", async (
     {
         return Results.Conflict(new { error = ex.Message });
     }
+    catch (DefaultAgentNameChangeException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
 });
 
 // The chat assistant. Conversations live in SQL Server; each turn replays the stored history to an
@@ -256,11 +260,32 @@ app.MapGet("/api/chat/conversations", (
 app.MapPost("/api/chat/conversations", async (
     NewConversation? body,
     IChatStore store,
+    IAgentStore agentStore,
     CancellationToken cancellationToken) =>
 {
     var title = string.IsNullOrWhiteSpace(body?.Title) ? "New chat" : body!.Title!.Trim();
     var userId = string.IsNullOrWhiteSpace(body?.UserId) ? null : body!.UserId!.Trim();
-    return Results.Ok(await store.CreateConversationAsync(title, userId, cancellationToken));
+    Guid? requestedAgentId = null;
+    if (!string.IsNullOrWhiteSpace(body?.AgentId))
+    {
+        if (!Guid.TryParse(body.AgentId, out var parsedAgentId))
+        {
+            return Results.BadRequest(new { error = "'agentId' must be a valid GUID when provided." });
+        }
+
+        requestedAgentId = parsedAgentId;
+    }
+
+    var usesDefaultAgent = requestedAgentId is null || requestedAgentId == Guid.Empty;
+    var selectedAgent = await ResolveAgentAsync(requestedAgentId, agentStore, cancellationToken);
+    if (selectedAgent is null)
+    {
+        return usesDefaultAgent
+            ? Results.Problem("The default agent is unavailable.", statusCode: StatusCodes.Status503ServiceUnavailable)
+            : Results.BadRequest(new { error = "The selected agent does not exist." });
+    }
+
+    return Results.Ok(await store.CreateConversationAsync(title, userId, selectedAgent.Id, cancellationToken));
 });
 
 app.MapDelete("/api/chat/conversations/{id:guid}", async (
@@ -290,6 +315,7 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
     Guid id,
     ChatTurnRequest body,
     IChatStore store,
+    IAgentStore agentStore,
     ChatAgentService agent,
     ILogger<Program> logger,
     HttpResponse response,
@@ -304,6 +330,14 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
     if (conversation is null)
     {
         return Results.NotFound();
+    }
+
+    var selectedAgent = await ResolveAgentAsync(conversation.AgentId, agentStore, cancellationToken);
+    if (selectedAgent is null)
+    {
+        return Results.Problem(
+            "The agent assigned to this conversation is unavailable.",
+            statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 
     var content = body.Content.Trim();
@@ -352,6 +386,7 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
             history,
             content,
             conversation.UserId,
+            selectedAgent.Instructions,
             (text, token) => WriteEventAsync(new ChatStreamEvent("delta", Text: text), token),
             (status, token) => WriteEventAsync(new ChatStreamEvent("status", Message: status), token),
             cancellationToken);
@@ -482,6 +517,14 @@ static string? ValidateAgentDefinition(string name, string instructions)
     return string.IsNullOrWhiteSpace(instructions) ? "Non-empty 'instructions' are required." : null;
 }
 
+static Task<AgentDefinition?> ResolveAgentAsync(
+    Guid? agentId,
+    IAgentStore agentStore,
+    CancellationToken cancellationToken) =>
+    agentId is { } id && id != Guid.Empty
+        ? agentStore.GetAsync(id, cancellationToken)
+        : agentStore.GetByNameAsync(AgentDefaults.Name, cancellationToken);
+
 /// <summary>
 /// Request body for the search endpoints. When <see cref="UserId"/> is supplied, results are restricted to
 /// content that user is allowed to view; omitting it searches the whole index.
@@ -503,10 +546,10 @@ public sealed record SubscriptionLifetime(int? Days);
 public sealed record CreateSubscriptionRequest(int? Days, string? NotificationUrl);
 
 /// <summary>
-/// A new conversation. <see cref="UserId"/> is optional and, when given, restricts every search the
-/// assistant runs in that conversation to what the user is allowed to see.
+/// A new conversation. <see cref="UserId"/> optionally restricts search permissions, while a null or
+/// empty <see cref="AgentId"/> selects the built-in default agent.
 /// </summary>
-public sealed record NewConversation(string? Title, string? UserId);
+public sealed record NewConversation(string? Title, string? UserId, string? AgentId);
 
 public sealed record ChatTurnRequest(string? Content);
 

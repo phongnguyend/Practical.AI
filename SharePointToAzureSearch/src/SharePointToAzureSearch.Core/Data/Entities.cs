@@ -53,6 +53,7 @@ public sealed class ChatConversationEntity
     public Guid Id { get; set; }
     public string Title { get; set; } = "";
     public string? UserId { get; set; }
+    public Guid? AgentId { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
     public long InputTokenCount { get; set; }
@@ -60,6 +61,7 @@ public sealed class ChatConversationEntity
     public long TotalTokenCount { get; set; }
 
     public ICollection<ChatMessageEntity> Messages { get; set; } = [];
+    public AgentDefinitionEntity? Agent { get; set; }
 }
 
 public sealed class ChatMessageEntity

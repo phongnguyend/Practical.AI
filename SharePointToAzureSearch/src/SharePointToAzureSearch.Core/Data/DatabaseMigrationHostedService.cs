@@ -18,8 +18,6 @@ public sealed class DatabaseMigrationHostedService(
     IDbContextFactory<SharePointIndexDbContext> contextFactory,
     ILogger<DatabaseMigrationHostedService> logger) : IHostedService
 {
-    private const string DefaultAgentName = "Default";
-
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -44,7 +42,7 @@ public sealed class DatabaseMigrationHostedService(
         SharePointIndexDbContext context,
         CancellationToken cancellationToken)
     {
-        if (await context.AgentDefinitions.AnyAsync(a => a.Name == DefaultAgentName, cancellationToken))
+        if (await context.AgentDefinitions.AnyAsync(a => a.Name == AgentDefaults.Name, cancellationToken))
         {
             logger.LogInformation("The default agent already exists.");
             return;
@@ -53,7 +51,7 @@ public sealed class DatabaseMigrationHostedService(
         var now = DateTimeOffset.UtcNow;
         context.AgentDefinitions.Add(new AgentDefinitionEntity
         {
-            Name = DefaultAgentName,
+            Name = AgentDefaults.Name,
             Instructions = ChatAgentService.GetDefaultInstructions(),
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
