@@ -101,6 +101,7 @@ public sealed class EfFileMetadataStore(IDbContextFactory<SharePointIndexDbConte
         row.PermissionsHash = record.PermissionsHash;
         row.IndexFingerprint = Truncate(record.IndexFingerprint, 200)!;
         row.ChunkCount = record.ChunkCount;
+        row.EmbeddingTokenCount = record.EmbeddingTokenCount;
         row.ScanId = record.ScanId;
         row.IndexedAtUtc = record.IndexedAtUtc;
 
@@ -149,7 +150,8 @@ public sealed class EfFileMetadataStore(IDbContextFactory<SharePointIndexDbConte
         row.IndexFingerprint,
         row.ChunkCount,
         row.ScanId,
-        row.IndexedAtUtc);
+        row.IndexedAtUtc,
+        row.EmbeddingTokenCount);
 
     private static string? Truncate(string? value, int length) =>
         value is not null && value.Length > length ? value[..length] : value;

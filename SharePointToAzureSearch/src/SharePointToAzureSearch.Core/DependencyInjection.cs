@@ -116,13 +116,34 @@ public static class DependencyInjection
     }
 
     /// <summary>
-    /// Adds read-only access to the worker's SQL Server state — the delta checkpoints and the indexed-file
-    /// records — for operator-facing views. Nothing registered here writes to those tables.
+    /// Adds operator access to the worker's SQL Server state. Indexed-file views are read-only;
+    /// delta checkpoints can also be reset or deleted.
     /// </summary>
     public static IServiceCollection AddIndexStateServices(this IServiceCollection services, IConfiguration configuration)
     {
         AddDatabase(services, configuration);
         services.AddSingleton<IIndexStateReader, EfIndexStateReader>();
+        services.AddSingleton<DeltaStateAdminService>();
+        return services;
+    }
+
+    /// <summary>
+    /// Adds targeted reindexing to the API. The API already registers Graph, search, embeddings, MarkItDown,
+    /// and the database through its other service groups; this adds the worker's extraction pipeline.
+    /// </summary>
+    public static IServiceCollection AddIndexedFileReindexServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<DocumentIntelligenceOptions>().Bind(configuration.GetSection(DocumentIntelligenceOptions.SectionName))
+            .Validate(o => string.IsNullOrWhiteSpace(o.Endpoint) || o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "DocumentIntelligence:ApiKey is required when an endpoint is configured and UsedManagedIdentity is false.").ValidateOnStart();
+        services.AddOptions<ProcessorOptions>().Bind(configuration.GetSection(ProcessorOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => o.ChunkOverlapCharacters < o.ChunkSizeCharacters, "Chunk overlap must be smaller than chunk size.")
+            .Validate(o => o.AllowedFileExtensions.Any(x => !string.IsNullOrWhiteSpace(x)), "Processor:AllowedFileExtensions must list at least one file extension.").ValidateOnStart();
+        services.AddHttpClient<DocumentIntelligenceClient>();
+        services.AddSingleton<IContentExtractor, ContentExtractor>();
+        services.AddSingleton<IDeltaStateStore, EfDeltaStateStore>();
+        services.AddSingleton<IFileMetadataStore, EfFileMetadataStore>();
+        services.AddSingleton<ISearchIndexStore, AzureSearchIndexStore>();
+        services.AddSingleton<ISharePointChangeProcessor, SharePointChangeProcessor>();
         return services;
     }
 

@@ -80,7 +80,8 @@ public sealed record FileIndexRecord(
     string IndexFingerprint,
     int ChunkCount,
     Guid ScanId,
-    DateTimeOffset IndexedAtUtc);
+    DateTimeOffset IndexedAtUtc,
+    long? EmbeddingTokenCount);
 
 /// <summary>
 /// The file and permission fields of a chunk, without its content or vector. Merging this onto an

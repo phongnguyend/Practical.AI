@@ -21,6 +21,7 @@ import {
   deleteSubscription,
   listSubscriptions,
   renewSubscription,
+  setSubscriptionAutoRenew,
   updateSubscription,
 } from '../api/client'
 import type { SubscriptionStatus, SubscriptionView } from '../api/types'
@@ -41,6 +42,7 @@ export default function SubscriptionsPage() {
   const [subscriptionName, setSubscriptionName] = useState('')
   const [lifetimeDays, setLifetimeDays] = useState(28)
   const [notificationUrl, setNotificationUrl] = useState('')
+  const [clientStateInput, setClientStateInput] = useState('')
   // null when the dialog is closed; a subscription when editing one, 'new' when creating.
   const [editing, setEditing] = useState<SubscriptionView | 'new' | null>(null)
   const [dialogError, setDialogError] = useState<string | null>(null)
@@ -55,6 +57,8 @@ export default function SubscriptionsPage() {
   // The field starts empty and the configured URL is only the input's greyed hint, so the URL is
   // always typed deliberately rather than inherited from a value nobody looked at.
   const trimmedUrl = notificationUrl.trim()
+  const trimmedClientState = clientStateInput.trim()
+  const clientStateInvalid = trimmedClientState !== '' && (trimmedClientState.length < 16 || trimmedClientState.length > 128)
   const urlIsHttps = /^https:\/\/.+/i.test(trimmedUrl)
   const isOverride = data !== null && trimmedUrl !== '' && trimmedUrl !== data.expectedNotificationUrl
   // A URL already in use elsewhere is refused by the API; catching it here saves the round trip.
@@ -77,6 +81,7 @@ export default function SubscriptionsPage() {
     setLifetimeDays(data?.lifetimeDays ?? 28)
     // Editing shows the subscription's own URL; creating leaves the field empty.
     setNotificationUrl(subscription === 'new' ? '' : subscription.notificationUrl)
+    setClientStateInput('')
     setDialogError(null)
     setEditing(subscription)
   }
@@ -107,7 +112,7 @@ export default function SubscriptionsPage() {
     setNotice(null)
     try {
       if (target === null) {
-        await createSubscription(subscriptionName, lifetimeDays, notificationUrl)
+        await createSubscription(subscriptionName, lifetimeDays, notificationUrl, clientStateInput)
         setNotice('Subscription created.')
       } else {
         const updateId = target.id ?? target.databaseId
@@ -119,13 +124,14 @@ export default function SubscriptionsPage() {
           subscriptionName,
           lifetimeDays,
           notificationUrl,
+          clientStateInput,
         )
         setNotice(
           target.id === null
             ? `${result.subscription.name} Graph subscription created — its ID is ${result.subscription.id}.`
             : result.warning ??
             (result.replaced
-              ? `Name or notification URL changed, so the subscription was replaced — its ID is now ${result.subscription.id}.`
+              ? `The subscription was replaced to apply its changes — its ID is now ${result.subscription.id}.`
               : 'Subscription updated.'),
         )
       }
@@ -197,11 +203,17 @@ export default function SubscriptionsPage() {
               key={item.id ?? item.databaseId ?? `database:${item.name}`}
               item={item}
               days={data.lifetimeDays}
-              renewalEnabled={data.renewalEnabled}
               renewalCheckHours={data.renewalCheckHours}
               renewalThresholdDays={data.renewalThresholdDays}
               busy={busy}
               onEdit={item.isTracked ? () => openDialog(item) : undefined}
+              onAutoRenewToggle={item.databaseId
+                ? () => run(
+                    `auto-renew:${item.databaseId}`,
+                    `Automatic renewal ${item.autoRenewEnabled ? 'disabled' : 'enabled'} for ${item.name}.`,
+                    () => setSubscriptionAutoRenew(item.databaseId!, !item.autoRenewEnabled),
+                  )
+                : undefined}
               onRenew={
                 item.id === null
                   ? undefined
@@ -226,7 +238,7 @@ export default function SubscriptionsPage() {
           <Empty
             title="No subscriptions on this application registration"
             icon={<Webhook size={26} strokeWidth={1.5} />}
-            detail="Create one with the button above, or leave it to the renewal service if automatic renewal is on."
+            detail="Create one with the button above, or enable automatic renewal for the Default record."
           />
         </div>
       ) : null}
@@ -244,7 +256,7 @@ export default function SubscriptionsPage() {
             </button>
             <button
               className="primary"
-              disabled={busy === 'save' || !subscriptionName.trim() || !urlIsHttps || urlTaken}
+              disabled={busy === 'save' || !subscriptionName.trim() || !urlIsHttps || urlTaken || clientStateInvalid}
               onClick={save}
             >
               {isCreating ? <Plus size={14} /> : <Check size={14} />}
@@ -260,8 +272,8 @@ export default function SubscriptionsPage() {
             label="Name"
             help={
               nameLocked
-                ? 'The auto-renewed subscription is always named Default.'
-                : 'Saved in the database and included in authenticated Microsoft Graph clientState.'
+                ? 'The default subscription is always named Default.'
+                : 'Saved in the database and included in the generated client state unless you enter a custom value.'
             }
           >
             <input
@@ -282,7 +294,7 @@ export default function SubscriptionsPage() {
             label="Notification URL"
             help={
               target?.isDefault
-                ? 'Changing this URL also updates the database-backed Default subscription used by auto-renewal.'
+                ? 'Changing this URL also updates the database-backed Default subscription.'
                 : 'Where Microsoft Graph posts change notifications. It must be HTTPS, reachable from the internet, and not already used by another subscription.'
             }
           >
@@ -294,6 +306,28 @@ export default function SubscriptionsPage() {
               onChange={(event) => setNotificationUrl(event.target.value)}
             />
           </Field>
+
+          <Field
+            label="Client state"
+            help={isCreating
+              ? 'Optional. Leave blank to generate an authenticated value. A custom value must be 16-128 characters.'
+              : `Leave blank to keep the ${target?.hasCustomClientState ? 'saved custom' : 'generated'} value. Enter 16-128 characters to replace it.`}
+          >
+            <input
+              type="password"
+              autoComplete="new-password"
+              maxLength={128}
+              value={clientStateInput}
+              onChange={(event) => setClientStateInput(event.target.value)}
+              placeholder={isCreating ? 'Optional custom client state' : 'Leave blank to keep current value'}
+            />
+          </Field>
+
+          {clientStateInvalid ? (
+            <Hint tone="critical" icon={<CircleX size={13} />}>
+              Client state must be 16-128 characters.
+            </Hint>
+          ) : null}
 
           <Field label="Lifetime (days)" help="From now, capped at 29 — the most Microsoft Graph allows.">
             <input
@@ -316,16 +350,15 @@ export default function SubscriptionsPage() {
             <Hint tone="critical" icon={<CircleX size={13} />}>
               Another subscription already uses this notification URL.
             </Hint>
-          ) : urlChanged ? (
+          ) : urlChanged || (target !== null && trimmedClientState !== '') ? (
             <Hint tone="warning" icon={<TriangleAlert size={13} color="var(--warning)" />}>
-              Microsoft Graph cannot move a subscription to a new URL, so saving replaces this one: a
-              new subscription is created first and the old removed only once that succeeds. The ID
-              will change.
+              Saving this change may replace the Graph subscription. A new one is created first, then the
+              old one is removed. The ID will change.
             </Hint>
           ) : isCreating && isOverride ? (
             <Hint tone="warning" icon={<TriangleAlert size={13} color="var(--warning)" />}>
-              This differs from the database-backed Default URL, so auto-renewal will not treat this
-              subscription as the Default one.
+              This differs from the database-backed Default URL, so this subscription will not be
+              treated as the Default one.
             </Hint>
           ) : null}
         </div>
@@ -337,21 +370,21 @@ export default function SubscriptionsPage() {
 function SubscriptionCard({
   item,
   days,
-  renewalEnabled,
   renewalCheckHours,
   renewalThresholdDays,
   busy,
   onEdit,
+  onAutoRenewToggle,
   onRenew,
   onDelete,
 }: {
   item: SubscriptionView
   days: number
-  renewalEnabled: boolean
   renewalCheckHours: number
   renewalThresholdDays: number
   busy: string | null
   onEdit?: () => void
+  onAutoRenewToggle?: () => void
   onRenew?: () => void
   onDelete?: () => void
 }) {
@@ -399,21 +432,21 @@ function SubscriptionCard({
             <>
               <dt>Default lifetime</dt>
               <dd>{days} days</dd>
-
-              <dt>Auto-renewal</dt>
-              <dd>
-                <span className={renewalEnabled ? 'badge good' : 'badge warning'}>
-                  {renewalEnabled ? <RotateCw size={12} /> : <Ban size={12} />}
-                  {renewalEnabled ? 'On' : 'Off'}
-                </span>
-                {renewalEnabled ? (
-                  <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>
-                    checked every {renewalCheckHours} h, renewed inside {renewalThresholdDays} days
-                  </span>
-                ) : null}
-              </dd>
             </>
           ) : null}
+
+          <dt>Auto-renewal</dt>
+          <dd>
+            <span className={item.autoRenewEnabled ? 'badge good' : 'badge warning'}>
+              {item.autoRenewEnabled ? <RotateCw size={12} /> : <Ban size={12} />}
+              {item.autoRenewEnabled ? 'Enabled' : 'Disabled'}
+            </span>
+            {item.autoRenewEnabled ? (
+              <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>
+                check interval {renewalCheckHours} h, renewal window {renewalThresholdDays} days
+              </span>
+            ) : null}
+          </dd>
 
           <dt>Expires</dt>
           <dd>{item.expirationUtc ? formatDateTime(item.expirationUtc) : 'No Graph subscription'}</dd>
@@ -431,7 +464,7 @@ function SubscriptionCard({
             <MatchValue value={item.notificationUrl} matches={item.notificationUrlMatches} />
           </dd>
 
-          <dt title="Whether the secret on the subscription is the one this deployment validates with">
+          <dt title="Whether the client state on the subscription is the one this deployment validates with">
             Client state
           </dt>
           <dd>
@@ -440,7 +473,7 @@ function SubscriptionCard({
               {item.id === null
                 ? 'No Graph subscription'
                 : item.clientStateMatches
-                  ? 'Matches configuration'
+                  ? item.hasCustomClientState ? 'Matches saved value' : 'Matches configuration'
                   : 'Different or unset'}
             </span>
           </dd>
@@ -449,6 +482,14 @@ function SubscriptionCard({
         <div className="row spread">
           {item.id ? <CopyButton value={item.id} label="Copy ID" /> : <span className="hint">Database record</span>}
           <div className="row" style={{ gap: 8 }}>
+            {onAutoRenewToggle ? (
+              <button disabled={anyBusy} onClick={onAutoRenewToggle}>
+                {item.autoRenewEnabled ? <Ban size={14} /> : <RotateCw size={14} />}
+                {busy === `auto-renew:${item.databaseId}`
+                  ? 'Saving…'
+                  : item.autoRenewEnabled ? 'Disable auto-renew' : 'Enable auto-renew'}
+              </button>
+            ) : null}
             {onRenew ? (
               <button disabled={anyBusy} onClick={onRenew}>
                 <RotateCw size={14} />
@@ -466,7 +507,7 @@ function SubscriptionCard({
             {item.isDefault ? (
               <button
                 disabled
-                title="The default subscription is on the configured SharePoint:NotificationUrl; the renewal service would recreate it."
+                title="The Default subscription is a reserved database record and cannot be deleted."
               >
                 <Lock size={14} />
                 Delete

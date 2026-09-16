@@ -4,7 +4,7 @@ This .NET 10 solution keeps a permission-aware Azure AI Search vector index sync
 
 ## Components
 
-- `SharePointToAzureSearch.Api` exposes `POST /api/sharepoint/webhook`, completes Microsoft Graph's validation handshake, validates `clientState`, and publishes change signals to an Azure Service Bus topic. It also serves the search endpoints and the read-only state endpoints the front end uses.
+- `SharePointToAzureSearch.Api` exposes `POST /api/sharepoint/webhook`, completes Microsoft Graph's validation handshake, validates `clientState`, and publishes change signals to an Azure Service Bus topic. It also serves search, state, and checkpoint management endpoints for the front end.
 - `frontend` is a React and Vite app for viewing the worker's SQL Server state and running the three retrieval strategies against the index. See [frontend/README.md](frontend/README.md).
 - `SharePointToAzureSearch.Background` consumes a topic subscription. It follows the Microsoft Graph drive delta feed and, for each file the feed returns, compares it against the metadata recorded for the last indexing run in SQL Server: an unchanged file is left alone, a renamed or re-shared file has its metadata refreshed in place, and only a file whose content actually changed is downloaded, extracted, chunked, embedded, and replaced. Deleted files have all chunks removed. Two more hosted services run alongside it: one creates the Graph subscription and renews it before expiration (`SharePoint:SubscriptionRenewalEnabled` to turn it off), and one runs the same delta synchronization every `Processor:ScheduledSyncMinutes` (5 by default, `ScheduledSyncEnabled` to turn it off) so missed notifications still get picked up. Either trigger can run without the other: disable the subscription to poll only, or disable the schedule to react only to notifications. All three triggers — notification, schedule, and startup sync — are serialized, so only one delta pass runs at a time.
 - `SharePointToAzureSearch.Core` uses the Microsoft Graph .NET SDK for subscriptions, delta tracking, downloads, and permissions, and contains the Service Bus, SQL Server state, extraction, embedding, and search-index implementations. Embeddings go through `Microsoft.Extensions.AI`'s `IEmbeddingGenerator<string, Embedding<float>>`, backed by `AzureOpenAIClient` from the Azure OpenAI SDK, so the embedding model can be swapped without touching the indexing or query code.
@@ -378,39 +378,49 @@ The response carries `totalCount` and the matching chunks with their relevance `
 
 ## State endpoints
 
-Read-only views over the worker's SQL Server state, for the front end and for operators. They read the database at `SqlServer:ConnectionString` and never write to it, and an empty table reads as an empty result, so they work before the worker's first pass.
+Views over the worker's SQL Server state for the front end and operators. The GET endpoints read the database at `SqlServer:ConnectionString`; an empty table reads as an empty result before the worker's first pass. The checkpoint actions below update that database.
 
 | Endpoint | Returns |
 | --- | --- |
 | `GET /api/state/summary` | Totals over `SharePointIndexedFiles` — files, chunks, source size, distinct drives, the files whose `ScanId` is not the round in the checkpoint, distinct index fingerprints, the indexing window, and a breakdown by content type |
-| `GET /api/state/indexed-files` | A page of `SharePointIndexedFiles`. `search` matches name, folder, URL, content type, or item ID; `driveId` filters exactly; `sort` is one of `name`, `path`, `mimeType`, `size`, `lastModifiedUtc`, `chunkCount`, `indexedAtUtc` with `desc`; `skip` and `top` (1-200, default 25) page it |
+| `GET /api/state/indexed-files` | A page of `SharePointIndexedFiles`, including each file's embedding token count from its latest successful indexing. `search` matches name, folder, URL, content type, or item ID; `driveId` filters exactly; `sort` is one of `name`, `path`, `mimeType`, `size`, `lastModifiedUtc`, `chunkCount`, `embeddingTokenCount`, `indexedAtUtc` with `desc`; `skip` and `top` (1-200, default 25) page it |
 | `GET /api/state/indexed-files/{driveId}/{itemId}` | One row, or 404 |
+| `POST /api/state/indexed-files/{driveId}/{itemId}/reindex` | Fetch the current SharePoint file and force extraction, embedding, and index replacement; return its updated record |
 | `GET /api/state/delta` | Every `SharePointDeltaState` row, newest checkpoint first |
+| `POST /api/state/delta/{driveId}/reset` | Clear that drive's delta link and sweep marker, retaining the row. The next sync starts a full scan. Returns 404 if the row is absent. |
+| `DELETE /api/state/delta/{driveId}` | Remove that drive's checkpoint row. The next sync starts a full scan and writes a new row. Returns 404 if absent. |
 
-Like the search endpoints they are unauthenticated and unfiltered, so the same warning applies: put authentication in front of them, because between them they expose every indexed file's metadata and the Graph delta tokens.
+`embeddingTokenCount` sums the token usage returned for every embedding request made during the file's latest successful indexing. It stays unchanged on metadata-only updates. It is `null` for files indexed before this field existed or when the embedding service does not report usage.
+
+Chat attachment files record the same count in `ChatMessageAttachmentFiles`; the attachment upload, list, and reindex responses expose it, and the Attachment files page shows it. A failed indexing attempt clears the count along with its chunk count.
+
+The indexed-file reindex endpoint uses the API's `Processor` and `DocumentIntelligence` settings. Keep the API's `Processor` chunk size, overlap, file-size limit, and allowed extensions aligned with the worker so a manual reindex produces the same chunks as a delta pass.
+
+Like the search endpoints they are unauthenticated and unfiltered, so put authentication in front of them before exposing the API. The GET responses expose indexed-file metadata and Graph delta tokens; the POST and DELETE endpoints change worker checkpoints. Run checkpoint actions while synchronization is idle, since an active pass can write a new checkpoint afterward.
 
 ## Subscription endpoints
 
-Managing Microsoft Graph webhook subscriptions by hand, for when the renewal service is off or a subscription has to be replaced. Subscription names and Graph IDs are persisted in `WebhookSubscriptions`; the signed name is also carried in `clientState` so incoming notifications can still be authenticated. They share `SubscriptionManager` with `SubscriptionRenewalBackgroundService`, so both paths use the same Default definition.
+Managing Microsoft Graph webhook subscriptions by hand, for when the renewal service is off or a subscription has to be replaced. Subscription names, Graph IDs, and each record's auto-renew setting are persisted in `WebhookSubscriptions`; the signed name is also carried in `clientState` so incoming notifications can still be authenticated. The renewal worker checks every enabled record when the global `SharePoint:SubscriptionRenewalEnabled` setting is on. The Default record starts enabled; new additional subscriptions start disabled.
 
 | Endpoint | Effect |
 | --- | --- |
 | `GET /api/subscriptions` | One union of database-tracked records and subscriptions found on the application registration, merged by Graph subscription ID. A tracked record missing from Graph has a `databaseId`, null Graph `id`/`expirationUtc`, and `Missing` status; unmatched Graph entries are untracked. Saved names and the `isDefault` flag identify the Default record. |
-| `POST /api/subscriptions` | Creates one over the configured resource. Body `{ "days": 28, "notificationUrl": "https://..." }` — both optional, falling back to `SharePoint:SubscriptionLifetimeDays` and `SharePoint:NotificationUrl`; `days` is clamped to 1-29 |
-| `PUT /api/subscriptions/{id}` | Changes a subscription's lifetime and, for a non-default one, its notification URL |
+| `POST /api/subscriptions` | Creates one over the configured resource. Body may include `name`, `days`, `notificationUrl`, and `clientState`; an omitted client state uses the signed value generated from the name and configured secret |
+| `PUT /api/subscriptions/{id}` | Changes a subscription's lifetime, name, notification URL, or client state. Omit `clientState` to retain its saved value |
 | `POST /api/subscriptions/{id}/renew` | Extends an existing subscription, body `{ "days": 28 }` |
+| `PUT /api/subscriptions/{databaseId}/auto-renew` | Enables or disables automatic renewal for a tracked record, body `{ "enabled": true }` |
 | `DELETE /api/subscriptions/{id}` | Removes it. Graph stops delivering notifications immediately |
 
 Two rules are enforced across all of them:
 
-- **The default subscription cannot be deleted or moved.** The default is whichever subscription sits on the configured `SharePoint:NotificationUrl`; the renewal service owns it and would recreate it, so both operations return `400`. Change `SharePoint:NotificationUrl` to move it.
+- **The default subscription cannot be deleted or moved.** Its database record is reserved even if auto-renewal is disabled. Change `SharePoint:NotificationUrl` to move it.
 - **Notification URLs are unique.** Creating or editing onto a URL another subscription already uses returns `409`.
 
-Microsoft Graph cannot `PATCH` a subscription's notification URL, so `PUT` applies a URL change by creating the replacement first and deleting the original only once that succeeds — a failure leaves the original in place rather than leaving the drive uncovered. The response says whether it did (`replaced`), because the subscription ID changes when it does, and carries a `warning` if the old one could not be removed afterwards.
+Changing a subscription's client state creates a replacement because Microsoft Graph does not support changing that property with `PATCH`. The replacement is created before the original is deleted. The response reports `replaced` and includes the new subscription ID.
 
 `PUT /api/subscriptions/{id}` accepts either a Graph ID or a tracked row's `databaseId`. Updating a tracked row that is missing from Graph creates and associates a new Graph subscription. Graph-only untracked rows cannot be updated.
 
-`clientState` is never returned — it is the secret the webhook authenticates notifications with, so each entry carries a `clientStateMatches` boolean instead. A rejection from Graph comes back as `502` with Graph's own message rather than an opaque `500`.
+Custom `clientState` values must be 16-128 characters and are saved in `WebhookSubscriptions.ClientState`. The webhook validates notifications against the saved value, and automatic recreation of the Default subscription reuses it. The value is never returned; each entry carries `clientStateMatches` and `hasCustomClientState` instead. A rejection from Graph comes back as `502` with Graph's message.
 
 **These endpoints change tenant state and are unauthenticated like the rest.** `DELETE` in particular stops change notifications, leaving the scheduled synchronization as the only trigger.
 

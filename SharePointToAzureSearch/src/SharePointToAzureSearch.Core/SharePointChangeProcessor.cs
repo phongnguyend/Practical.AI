@@ -9,7 +9,11 @@ namespace SharePointToAzureSearch.Core;
 public interface ISharePointChangeProcessor
 {
     Task ProcessAsync(CancellationToken cancellationToken);
+    Task<FileIndexRecord?> ReindexAsync(string driveId, string itemId, CancellationToken cancellationToken);
 }
+
+public sealed class FileNoLongerIndexableException(string fileName)
+    : InvalidOperationException($"SharePoint file '{fileName}' is no longer an indexable file.");
 
 public sealed class SharePointChangeProcessor(
     SharePointClient sharePointClient,
@@ -38,6 +42,39 @@ public sealed class SharePointChangeProcessor(
     // Serializes every trigger (Service Bus signals, the scheduled poll, and the startup sync) so a
     // single delta cursor is never advanced by two passes at once.
     private readonly SemaphoreSlim _gate = new(1, 1);
+
+    public async Task<FileIndexRecord?> ReindexAsync(string driveId, string itemId, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            // Only files already shown in this library's indexed-file table can be reindexed here.
+            if (!string.Equals(driveId, await sharePointClient.GetDriveIdAsync(cancellationToken), StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var tracked = await metadata.GetAsync(driveId, itemId, cancellationToken);
+            if (tracked is null)
+            {
+                return null;
+            }
+
+            var item = await sharePointClient.GetItemAsync(itemId, cancellationToken);
+            if (!item.IsFile || item.IsDeleted || !IsIndexable(item.Name))
+            {
+                throw new FileNoLongerIndexableException(item.Name);
+            }
+
+            await search.EnsureIndexAsync(cancellationToken);
+            await ReindexFileAsync(driveId, tracked.ScanId, item, cancellationToken);
+            return await metadata.GetAsync(driveId, itemId, cancellationToken);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
 
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
@@ -248,7 +285,7 @@ public sealed class SharePointChangeProcessor(
             return false;
         }
 
-        await metadata.SaveAsync(Track(driveId, scanId, item, permissionsHash, tracked.ChunkCount), cancellationToken);
+        await metadata.SaveAsync(Track(driveId, scanId, item, permissionsHash, tracked.ChunkCount, tracked.EmbeddingTokenCount), cancellationToken);
         logger.LogInformation("Updated the metadata and permissions of {FileName} ({ItemId}) across {ChunkCount} chunks; its content was unchanged, so it was not extracted or embedded again.", item.Name, item.Id, tracked.ChunkCount);
         return true;
     }
@@ -266,9 +303,15 @@ public sealed class SharePointChangeProcessor(
 
         var textChunks = TextChunker.Split(text, _processor.ChunkSizeCharacters, _processor.ChunkOverlapCharacters);
         var chunks = new List<SearchChunkDocument>(textChunks.Count);
+        long? embeddingTokenCount = 0;
         for (var index = 0; index < textChunks.Count; index++)
         {
-            var vector = await embeddings.GenerateVectorAsync(textChunks[index], cancellationToken: cancellationToken);
+            var generated = await embeddings.GenerateAsync([textChunks[index]], cancellationToken: cancellationToken);
+            var vector = generated[0].Vector;
+            var tokens = generated.Usage?.TotalTokenCount ?? generated.Usage?.InputTokenCount;
+            embeddingTokenCount = embeddingTokenCount.HasValue && tokens.HasValue
+                ? embeddingTokenCount.Value + tokens.Value
+                : null;
             chunks.Add(new SearchChunkDocument
             {
                 Id = SearchChunkKey.For(driveId, item.Id, index),
@@ -292,8 +335,8 @@ public sealed class SharePointChangeProcessor(
         await search.ReplaceItemAsync(driveId, item.Id, chunks, cancellationToken);
 
         // Tracked only after the index write succeeds, so a failed pass reindexes the file on its retry.
-        await metadata.SaveAsync(Track(driveId, scanId, item, HashPermissions(permissionsTask.Result), chunks.Count), cancellationToken);
-        logger.LogInformation("Indexed {FileName} ({ItemId}) as {ChunkCount} chunks.", item.Name, item.Id, chunks.Count);
+        await metadata.SaveAsync(Track(driveId, scanId, item, HashPermissions(permissionsTask.Result), chunks.Count, embeddingTokenCount), cancellationToken);
+        logger.LogInformation("Indexed {FileName} ({ItemId}) as {ChunkCount} chunks using {EmbeddingTokenCount} embedding tokens.", item.Name, item.Id, chunks.Count, embeddingTokenCount);
     }
 
     private async Task RemoveAsync(string driveId, string itemId, CancellationToken cancellationToken)
@@ -302,7 +345,7 @@ public sealed class SharePointChangeProcessor(
         await metadata.DeleteAsync(driveId, itemId, cancellationToken);
     }
 
-    private FileIndexRecord Track(string driveId, Guid scanId, DriveItemChange item, string permissionsHash, int chunkCount) => new(
+    private FileIndexRecord Track(string driveId, Guid scanId, DriveItemChange item, string permissionsHash, int chunkCount, long? embeddingTokenCount) => new(
         driveId,
         item.Id,
         item.Name,
@@ -317,7 +360,8 @@ public sealed class SharePointChangeProcessor(
         _indexFingerprint,
         chunkCount,
         scanId,
-        DateTimeOffset.UtcNow);
+        DateTimeOffset.UtcNow,
+        embeddingTokenCount);
 
     /// <summary>
     /// True when the indexed chunks were built from the content the drive item holds now, by the pipeline

@@ -2,15 +2,17 @@ import { useState, type CSSProperties } from 'react'
 import {
   ArrowDown,
   ArrowUp,
+  CircleCheck,
   ExternalLink,
   Eye,
   FileText,
   ListFilter,
   RefreshCw,
+  RotateCw,
   SearchX,
   X,
 } from 'lucide-react'
-import { downloadIndexedFile, listIndexedFiles } from '../api/client'
+import { downloadIndexedFile, listIndexedFiles, reindexIndexedFile } from '../api/client'
 import { FileTypeIcon } from '../components/FileTypeIcon'
 import { OfficePreview } from '../components/OfficePreview'
 import { isPreviewableOfficeFile } from '../lib/officeFiles'
@@ -30,13 +32,14 @@ import { useAsync, useDebounced } from '../lib/useAsync'
 // Widths are shares of the table, which is laid out fixed so that a long folder path or content type
 // is ellipsised rather than widening the table past its card.
 const COLUMNS: { key: SortKey; label: string; width: string; numeric?: boolean }[] = [
-  { key: 'name', label: 'Name', width: '21%' },
-  { key: 'path', label: 'Folder', width: '16%' },
-  { key: 'mimeType', label: 'Content type', width: '14%' },
-  { key: 'size', label: 'Size', width: '8%', numeric: true },
-  { key: 'chunkCount', label: 'Chunks', width: '10%', numeric: true },
-  { key: 'lastModifiedUtc', label: 'Modified', width: '15.5%', numeric: true },
-  { key: 'indexedAtUtc', label: 'Indexed', width: '15.5%', numeric: true },
+  { key: 'name', label: 'Name', width: '18%' },
+  { key: 'path', label: 'Folder', width: '13%' },
+  { key: 'mimeType', label: 'Content type', width: '11%' },
+  { key: 'size', label: 'Size', width: '7%', numeric: true },
+  { key: 'chunkCount', label: 'Chunks', width: '7%', numeric: true },
+  { key: 'embeddingTokenCount', label: 'Tokens', width: '9%', numeric: true },
+  { key: 'lastModifiedUtc', label: 'Modified', width: '12.5%', numeric: true },
+  { key: 'indexedAtUtc', label: 'Indexed', width: '12.5%', numeric: true },
 ]
 
 const PAGE_SIZES = [10, 25, 50, 100]
@@ -50,6 +53,9 @@ export default function IndexedFilesPage() {
   const [top, setTop] = useState(25)
   const [selected, setSelected] = useState<IndexedFileRow | null>(null)
   const [preview, setPreview] = useState<IndexedFileRow | null>(null)
+  const [reindexingKey, setReindexingKey] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const debouncedSearch = useDebounced(search)
   const debouncedDriveId = useDebounced(driveId)
@@ -74,9 +80,28 @@ export default function IndexedFilesPage() {
       setDesc((value) => !value)
     } else {
       setSort(key)
-      setDesc(key === 'indexedAtUtc' || key === 'lastModifiedUtc' || key === 'size' || key === 'chunkCount')
+      setDesc(key === 'indexedAtUtc' || key === 'lastModifiedUtc' || key === 'size' || key === 'chunkCount' || key === 'embeddingTokenCount')
     }
     setSkip(0)
+  }
+
+  const reindex = async (file: IndexedFileRow) => {
+    if (reindexingKey !== null) return
+    setReindexingKey(`${file.driveId}:${file.itemId}`)
+    setActionError(null)
+    setNotice(null)
+    try {
+      const updated = await reindexIndexedFile(file)
+      setSelected((current) =>
+        current?.driveId === updated.driveId && current.itemId === updated.itemId ? updated : current,
+      )
+      setNotice(`${updated.name} was reindexed.`)
+      page.reload()
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setReindexingKey(null)
+    }
   }
 
   return (
@@ -134,9 +159,11 @@ export default function IndexedFilesPage() {
         </div>
       </div>
 
-      <LoadingBar active={page.loading} />
+      <LoadingBar active={page.loading || reindexingKey !== null} />
 
       {page.error ? <ErrorBanner message={page.error} onRetry={page.reload} /> : null}
+      {actionError ? <ErrorBanner message={actionError} /> : null}
+      {notice ? <div className="banner success" role="status"><CircleCheck size={17} color="var(--good)" />{notice}</div> : null}
 
       {/* The detail panel only claims its column once a row is selected, so the table has the whole
           width while it is being scanned. */}
@@ -150,14 +177,15 @@ export default function IndexedFilesPage() {
                   {page.data.totalCount.toLocaleString()}{' '}
                   {page.data.totalCount === 1 ? 'row' : 'rows'}
                 </h2>
-                <span className="hint">Select a row for every recorded column</span>
+                <span className="hint">Select a row for details</span>
               </div>
               <div className="table-scroll">
-                <table className="table-fixed">
+                <table className="table-fixed" style={{ minWidth: 900 }}>
                   <colgroup>
                     {COLUMNS.map((column) => (
                       <col key={column.key} style={{ width: column.width }} />
                     ))}
+                    <col style={{ width: '10%' }} />
                   </colgroup>
                   <thead>
                     <tr>
@@ -182,6 +210,7 @@ export default function IndexedFilesPage() {
                           ) : null}
                         </th>
                       ))}
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -215,11 +244,26 @@ export default function IndexedFilesPage() {
                           </td>
                           <td className="num">{formatBytes(file.size)}</td>
                           <td className="num">{formatNumber(file.chunkCount)}</td>
+                          <td className="num" title="Embedding tokens used to index this file">
+                            {file.embeddingTokenCount === null ? '—' : formatNumber(file.embeddingTokenCount)}
+                          </td>
                           <td className="num" title={formatDateTime(file.lastModifiedUtc)}>
                             {formatRelative(file.lastModifiedUtc)}
                           </td>
                           <td className="num" title={formatDateTime(file.indexedAtUtc)}>
                             {formatRelative(file.indexedAtUtc)}
+                          </td>
+                          <td>
+                            <button
+                              disabled={reindexingKey !== null}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                void reindex(file)
+                              }}
+                            >
+                              <RotateCw size={13} />
+                              {reindexingKey === key ? 'Indexing…' : 'Reindex'}
+                            </button>
                           </td>
                         </tr>
                       )
@@ -320,6 +364,9 @@ function FileDetail({ file, onClose, onPreview }: { file: IndexedFileRow; onClos
 
           <dt>Chunks</dt>
           <dd>{formatNumber(file.chunkCount)}</dd>
+
+          <dt>Embedding tokens</dt>
+          <dd>{file.embeddingTokenCount === null ? '—' : formatNumber(file.embeddingTokenCount)}</dd>
 
           <dt>Modified</dt>
           <dd>{formatDateTime(file.lastModifiedUtc)}</dd>

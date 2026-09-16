@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 import {
   Bot,
   Check,
+  ChevronDown,
   Copy,
   Cpu,
   ExternalLink,
@@ -36,7 +37,7 @@ import {
   downloadAttachmentFile,
 } from '../api/client'
 import type { ChatConversation, ChatFeedback, ChatMessage, ChatMessageAttachment } from '../api/types'
-import { Empty, ErrorBanner, Field, LoadingBar, Modal } from '../components/ui'
+import { Empty, ErrorBanner, LoadingBar } from '../components/ui'
 import { FileTypeIcon } from '../components/FileTypeIcon'
 import { OfficePreview } from '../components/OfficePreview'
 import { isPreviewableOfficeFile } from '../lib/officeFiles'
@@ -65,13 +66,14 @@ export default function ChatPage() {
   const [agentStatus, setAgentStatus] = useState('Thinking…')
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [showNewConversation, setShowNewConversation] = useState(false)
-  const [selectedAgentId, setSelectedAgentId] = useState('')
   const [creatingConversation, setCreatingConversation] = useState(false)
+  const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const [attachments, setAttachments] = useState<ChatMessageAttachment[]>([])
   const [uploading, setUploading] = useState(false)
   const threadRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const agentMenuRef = useRef<HTMLDivElement>(null)
+  const agentMenuButtonRef = useRef<HTMLButtonElement>(null)
 
   const list = conversations.data ?? []
   const active = list.find((item) => item.id === activeId) ?? null
@@ -158,20 +160,34 @@ export default function ChatPage() {
     return () => clearTimeout(timer)
   }, [highlighted])
 
-  const openNewChat = () => {
-    setSelectedAgentId('')
-    setError(null)
-    setShowNewConversation(true)
-  }
+  useEffect(() => {
+    if (!agentMenuOpen) return
+    agentMenuRef.current?.querySelector<HTMLButtonElement>('.chat-agent-menu button')?.focus()
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      if (!agentMenuRef.current?.contains(event.target as Node)) setAgentMenuOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setAgentMenuOpen(false)
+      agentMenuButtonRef.current?.focus()
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePress)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePress)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [agentMenuOpen])
 
-  const newChat = async () => {
+  const newChat = async (agentId: string | null = null) => {
+    if (creatingConversation) return
+    setAgentMenuOpen(false)
     setError(null)
     setCreatingConversation(true)
     try {
-      const created = await createConversation({ agentId: selectedAgentId || null })
+      const created = await createConversation({ agentId })
       conversations.reload()
       open(created.id)
-      setShowNewConversation(false)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -339,6 +355,7 @@ export default function ChatPage() {
       </div>
 
       {error ? <ErrorBanner message={error} /> : null}
+      {agents.error ? <ErrorBanner message={agents.error} onRetry={agents.reload} /> : null}
 
       <div className="chat-shell">
         <aside className="card chat-sidebar">
@@ -347,10 +364,44 @@ export default function ChatPage() {
               <MessageSquare size={15} />
               Conversations
             </h2>
-            <button className="primary" onClick={openNewChat}>
-              <Plus size={14} />
-              New
-            </button>
+            <div
+              className="chat-new-actions"
+              ref={agentMenuRef}
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) setAgentMenuOpen(false)
+              }}
+            >
+              <button disabled={creatingConversation} onClick={() => void newChat()}>
+                <Plus size={14} />
+                New
+              </button>
+              <span className="chat-agent-picker">
+                <button
+                  ref={agentMenuButtonRef}
+                  type="button"
+                  aria-label="Choose agent for new conversation"
+                  title="Choose agent for new conversation"
+                  aria-expanded={agentMenuOpen}
+                  disabled={creatingConversation || agents.loading || !!agents.error}
+                  onClick={() => setAgentMenuOpen((open) => !open)}
+                >
+                  <ChevronDown size={14} aria-hidden="true" />
+                </button>
+              </span>
+              {agentMenuOpen ? (
+                <div className="chat-agent-menu" role="group" aria-label="Choose an agent">
+                  <span className="chat-agent-menu-label">Start a conversation with</span>
+                  <button type="button" onClick={() => void newChat()}><Bot size={14} />Default agent</button>
+                  {(agents.data ?? [])
+                    .filter((agent) => agent.name.toLowerCase() !== 'default')
+                    .map((agent) => (
+                      <button key={agent.id} type="button" title={agent.name} onClick={() => void newChat(agent.id)}>
+                        <Bot size={14} /><span>{agent.name}</span>
+                      </button>
+                    ))}
+                </div>
+              ) : null}
+            </div>
           </div>
           <LoadingBar active={conversations.loading} />
           <div className="chat-conversations">
@@ -358,7 +409,7 @@ export default function ChatPage() {
               <Empty
                 title="No conversations"
                 icon={<MessageSquare size={24} strokeWidth={1.5} />}
-                detail="Start one below."
+                detail="Use New or choose an agent."
               />
             ) : (
               list.map((item) => (
@@ -485,54 +536,6 @@ export default function ChatPage() {
           </div>
         </section>
       </div>
-
-      <Modal
-        open={showNewConversation}
-        title="New conversation"
-        icon={<MessageSquare size={17} />}
-        onClose={() => setShowNewConversation(false)}
-        footer={
-          <>
-            <button disabled={creatingConversation} onClick={() => setShowNewConversation(false)}>
-              <X size={14} />
-              Cancel
-            </button>
-            <button
-              className="primary"
-              disabled={creatingConversation}
-              onClick={() => void newChat()}
-            >
-              <Plus size={14} />
-              {creatingConversation ? 'Creatingâ€¦' : 'Create conversation'}
-            </button>
-          </>
-        }
-      >
-        <div className="stack">
-          {error ? <ErrorBanner message={error} /> : null}
-          {agents.error ? <ErrorBanner message={agents.error} onRetry={agents.reload} /> : null}
-          <Field
-            label="Agent"
-            help="Optional. If none is selected, this conversation uses the Default agent."
-          >
-            <select
-              autoFocus
-              value={selectedAgentId}
-              disabled={agents.loading || creatingConversation}
-              onChange={(event) => setSelectedAgentId(event.target.value)}
-            >
-              <option value="">Default agent</option>
-              {(agents.data ?? [])
-                .filter((agent) => agent.name.toLowerCase() !== 'default')
-                .map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name}
-                  </option>
-                ))}
-            </select>
-          </Field>
-        </div>
-      </Modal>
     </div>
   )
 }

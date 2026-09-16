@@ -31,6 +31,7 @@ export interface IndexedFileRow {
   chunkCount: number
   scanId: string
   indexedAtUtc: string
+  embeddingTokenCount: number | null
 }
 
 /** A row of the `SharePointDeltaState` table. */
@@ -68,6 +69,7 @@ export type SortKey =
   | 'size'
   | 'lastModifiedUtc'
   | 'chunkCount'
+  | 'embeddingTokenCount'
   | 'indexedAtUtc'
 
 export interface IndexedFileQuery {
@@ -137,6 +139,7 @@ export interface AttachmentFileRecord {
   sizeBytes: number
   status: UploadIndexStatus
   chunkCount: number
+  embeddingTokenCount: number | null
   errorMessage: string | null
   createdAtUtc: string
   updatedAtUtc: string
@@ -204,19 +207,21 @@ export interface SubscriptionView {
   notificationUrl: string
   expirationUtc: string | null
   clientStateMatches: boolean
+  hasCustomClientState: boolean
+  autoRenewEnabled: boolean
   resourceMatches: boolean
   notificationUrlMatches: boolean
   /** Has a database row associated with this Microsoft Graph subscription ID. */
   isTracked: boolean
   isManaged: boolean
-  /** On the configured SharePoint:NotificationUrl. The worker owns it, so it cannot be deleted here. */
+  /** Reserved Default record; it cannot be deleted here. */
   isDefault: boolean
   status: SubscriptionStatus
 }
 
 export interface UpdateSubscriptionResult {
   subscription: SubscriptionView
-  /** True when name or notification URL changed and Graph required a replacement. */
+  /** True when name, notification URL, or client state changed and Graph required a replacement. */
   replaced: boolean
   warning: string | null
 }

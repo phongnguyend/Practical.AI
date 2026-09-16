@@ -100,7 +100,7 @@ export default function AttachmentFilesPage() {
           <>
             <div className="table-scroll">
               <table>
-                <thead><tr><th>File</th><th>Status</th><th>Conversation</th><th>Size</th><th>Chunks</th><th>Uploaded</th><th>Indexed</th><th>Actions</th></tr></thead>
+                <thead><tr><th>File</th><th>Status</th><th>Conversation</th><th>Size</th><th>Chunks</th><th title="Embedding tokens used to index this attachment">Tokens</th><th>Uploaded</th><th>Indexed</th><th>Actions</th></tr></thead>
                 <tbody>
                   {page.data.items.map((file) => (
                     <tr key={file.id}>
@@ -125,6 +125,7 @@ export default function AttachmentFilesPage() {
                       </td>
                       <td>{formatBytes(file.sizeBytes)}</td>
                       <td>{file.chunkCount.toLocaleString()}</td>
+                      <td>{file.embeddingTokenCount === null ? '—' : file.embeddingTokenCount.toLocaleString()}</td>
                       <td title={formatDateTime(file.createdAtUtc)}>{formatRelative(file.createdAtUtc)}</td>
                       <td title={formatDateTime(file.indexedAtUtc)}>{formatRelative(file.indexedAtUtc)}</td>
                       <td>

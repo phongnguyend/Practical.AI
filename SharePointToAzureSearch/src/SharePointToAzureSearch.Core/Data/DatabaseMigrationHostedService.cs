@@ -113,6 +113,7 @@ public sealed class DatabaseMigrationHostedService(
         {
             Name = WebhookSubscriptionDefaults.Name,
             NotificationUrl = _sharePointOptions.NotificationUrl,
+            AutoRenewEnabled = true,
             LifetimeDays = _sharePointOptions.SubscriptionLifetimeDays,
             CreatedAtUtc = now,
             UpdatedAtUtc = now,

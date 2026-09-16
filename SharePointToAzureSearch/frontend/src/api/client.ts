@@ -103,6 +103,18 @@ export function listDeltaState(signal?: AbortSignal): Promise<DeltaStateRow[]> {
   return request<DeltaStateRow[]>('/api/state/delta', { signal })
 }
 
+export function resetDeltaState(driveId: string): Promise<{ reset: string }> {
+  return request<{ reset: string }>(`/api/state/delta/${encodeURIComponent(driveId)}/reset`, {
+    method: 'POST',
+  })
+}
+
+export function deleteDeltaState(driveId: string): Promise<{ deleted: string }> {
+  return request<{ deleted: string }>(`/api/state/delta/${encodeURIComponent(driveId)}`, {
+    method: 'DELETE',
+  })
+}
+
 export function listConversations(signal?: AbortSignal): Promise<ChatConversation[]> {
   return request<ChatConversation[]>('/api/chat/conversations', { signal })
 }
@@ -138,6 +150,13 @@ export function downloadIndexedFile(file: Pick<IndexedFileRow, 'driveId' | 'item
   return downloadBlob(
     `/api/state/indexed-files/${encodeURIComponent(file.driveId)}/${encodeURIComponent(file.itemId)}/content`,
     signal,
+  )
+}
+
+export function reindexIndexedFile(file: Pick<IndexedFileRow, 'driveId' | 'itemId'>): Promise<IndexedFileRow> {
+  return request<IndexedFileRow>(
+    `/api/state/indexed-files/${encodeURIComponent(file.driveId)}/${encodeURIComponent(file.itemId)}/reindex`,
+    { method: 'POST' },
   )
 }
 
@@ -337,6 +356,7 @@ export function createSubscription(
   name: string,
   days?: number,
   notificationUrl?: string,
+  clientState?: string,
 ): Promise<SubscriptionView> {
   return request<SubscriptionView>('/api/subscriptions', {
     method: 'POST',
@@ -345,6 +365,7 @@ export function createSubscription(
       name: name.trim(),
       days: days ?? null,
       notificationUrl: notificationUrl?.trim() || null,
+      clientState: clientState?.trim() || null,
     }),
   })
 }
@@ -358,19 +379,28 @@ export function renewSubscription(id: string, days?: number): Promise<Subscripti
 }
 
 /**
- * Changes a subscription's settings. A new name or URL requires replacement because Graph only lets
- * PATCH a URL, so the API replaces the subscription — the result says whether it did.
+ * Changes a subscription's settings. A new name, URL, or client state may require a replacement;
+ * the result says whether the subscription ID changed.
  */
 export function updateSubscription(
   id: string,
   name: string,
   days: number,
   notificationUrl: string,
+  clientState?: string,
 ): Promise<UpdateSubscriptionResult> {
   return request<UpdateSubscriptionResult>(`/api/subscriptions/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: name.trim(), days, notificationUrl: notificationUrl.trim() || null }),
+    body: JSON.stringify({ name: name.trim(), days, notificationUrl: notificationUrl.trim() || null, clientState: clientState?.trim() || null }),
+  })
+}
+
+export function setSubscriptionAutoRenew(id: string, enabled: boolean): Promise<{ id: string; enabled: boolean }> {
+  return request(`/api/subscriptions/${encodeURIComponent(id)}/auto-renew`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
   })
 }
 

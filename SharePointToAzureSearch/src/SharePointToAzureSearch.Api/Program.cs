@@ -13,6 +13,7 @@ builder.Services.AddSearchQueryServices(builder.Configuration);
 builder.Services.AddIndexStateServices(builder.Configuration);
 builder.Services.AddChatServices(builder.Configuration);
 builder.Services.AddAttachmentFileServices(builder.Configuration);
+builder.Services.AddIndexedFileReindexServices(builder.Configuration);
 
 // The viewer front end is served from its own origin during development. Origins are configured rather
 // than wildcarded, because these endpoints are unauthenticated and expose the whole index.
@@ -33,6 +34,7 @@ app.MapPost("/api/sharepoint/webhook", async (
     HttpRequest request,
     IChangeSignalPublisher publisher,
     SharePointClient sharePointClient,
+    IWebhookSubscriptionStore subscriptionStore,
     IOptions<SharePointOptions> options,
     ILogger<Program> logger,
     CancellationToken cancellationToken) =>
@@ -49,10 +51,16 @@ app.MapPost("/api/sharepoint/webhook", async (
     }
 
     var driveId = await sharePointClient.GetDriveIdAsync(cancellationToken);
+    var trackedSubscriptions = await subscriptionStore.ListAsync(cancellationToken);
 
     foreach (var notification in envelope.Value)
     {
-        if (!SubscriptionClientState.IsValid(notification.ClientState, options.Value.ClientState))
+        var tracked = trackedSubscriptions.FirstOrDefault(item =>
+            string.Equals(item.GraphSubscriptionId, notification.SubscriptionId, StringComparison.Ordinal));
+        var clientStateValid = tracked?.ClientState is { } customClientState
+            ? SubscriptionClientState.IsExactMatch(notification.ClientState, customClientState)
+            : SubscriptionClientState.IsValid(notification.ClientState, options.Value.ClientState);
+        if (!clientStateValid)
         {
             logger.LogWarning("Ignored a SharePoint notification with an invalid clientState.");
             continue;
@@ -82,8 +90,8 @@ app.MapPost("/api/search/hybrid", (
     ISearchQueryStore store,
     CancellationToken cancellationToken) => SearchAsync(SearchQueryMode.Hybrid, payload, store, cancellationToken));
 
-// Read-only views over the worker's SQL Server state. Like the search endpoints, these are
-// unauthenticated and unfiltered, so put authentication in front of them before exposing them.
+// Operator views and checkpoint actions over the worker's SQL Server state. Like the search
+// endpoints, these are unauthenticated and unfiltered, so protect the API before exposing it.
 app.MapGet("/api/state/summary", (
     IIndexStateReader reader,
     CancellationToken cancellationToken) => reader.GetSummaryAsync(cancellationToken));
@@ -120,6 +128,38 @@ app.MapGet("/api/state/indexed-files/{driveId}/{itemId}", async (
 {
     var file = await reader.GetFileAsync(driveId, itemId, cancellationToken);
     return file is null ? Results.NotFound() : Results.Ok(file);
+});
+
+app.MapPost("/api/state/indexed-files/{driveId}/{itemId}/reindex", async (
+    string driveId,
+    string itemId,
+    ISharePointChangeProcessor processor,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var file = await processor.ReindexAsync(driveId, itemId, cancellationToken);
+        return file is null
+            ? Results.NotFound(new { error = "Indexed file not found in the configured SharePoint library." })
+            : Results.Ok(file);
+    }
+    catch (FileNoLongerIndexableException ex)
+    {
+        return Results.Conflict(new { error = ex.Message });
+    }
+    catch (FileTooLargeException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status413PayloadTooLarge);
+    }
+    catch (HttpRequestException ex)
+    {
+        if (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return Results.NotFound(new { error = "File no longer exists in SharePoint." });
+        }
+        return Results.Json(new { error = $"Microsoft Graph rejected the request: {ex.Message}" },
+            statusCode: StatusCodes.Status502BadGateway);
+    }
 });
 
 // The browser downloads the original Office bytes and renders them locally. Only indexed files in the
@@ -181,6 +221,22 @@ app.MapGet("/api/state/indexed-files/{driveId}/{itemId}/content", async (
 app.MapGet("/api/state/delta", (
     IIndexStateReader reader,
     CancellationToken cancellationToken) => reader.ListDeltaStateAsync(cancellationToken));
+
+app.MapPost("/api/state/delta/{driveId}/reset", async (
+    string driveId,
+    DeltaStateAdminService admin,
+    CancellationToken cancellationToken) =>
+    await admin.ResetAsync(driveId, cancellationToken)
+        ? Results.Ok(new { reset = driveId })
+        : Results.NotFound(new { error = "Delta state record not found." }));
+
+app.MapDelete("/api/state/delta/{driveId}", async (
+    string driveId,
+    DeltaStateAdminService admin,
+    CancellationToken cancellationToken) =>
+    await admin.DeleteAsync(driveId, cancellationToken)
+        ? Results.Ok(new { deleted = driveId })
+        : Results.NotFound(new { error = "Delta state record not found." }));
 
 app.MapPost("/api/attachment-files", async (
     HttpRequest request,
@@ -275,7 +331,7 @@ app.MapPost("/api/subscriptions", async (
     var name = string.IsNullOrWhiteSpace(body?.Name) ? "Additional" : body.Name.Trim();
     if (string.Equals(name, WebhookSubscriptionDefaults.Name, StringComparison.OrdinalIgnoreCase))
     {
-        return Results.BadRequest(new { error = "'Default' is reserved for the auto-renewed subscription." });
+        return Results.BadRequest(new { error = "'Default' is reserved for the default subscription." });
     }
     if (!subscriptions.IsValidName(name))
     {
@@ -288,7 +344,13 @@ app.MapPost("/api/subscriptions", async (
         return Results.BadRequest(new { error = NotificationUrlError });
     }
 
-    return await CallGraphAsync(() => subscriptions.CreateAsync(name, body?.Days, notificationUrl, cancellationToken));
+    var clientState = string.IsNullOrWhiteSpace(body?.ClientState) ? null : body!.ClientState!.Trim();
+    if (clientState is not null && !SubscriptionManager.IsValidCustomClientState(clientState))
+    {
+        return Results.BadRequest(new { error = "'clientState' must be 16-128 characters." });
+    }
+
+    return await CallGraphAsync(() => subscriptions.CreateAsync(name, body?.Days, notificationUrl, clientState, cancellationToken));
 });
 
 app.MapPost("/api/subscriptions/{id}/renew", (
@@ -297,6 +359,24 @@ app.MapPost("/api/subscriptions/{id}/renew", (
     SubscriptionManager subscriptions,
     CancellationToken cancellationToken) =>
     CallGraphAsync(() => subscriptions.RenewAsync(id, body?.Days, cancellationToken)));
+
+app.MapPut("/api/subscriptions/{id:guid}/auto-renew", async (
+    Guid id,
+    SubscriptionAutoRenewRequest? body,
+    SubscriptionManager subscriptions,
+    CancellationToken cancellationToken) =>
+{
+    if (body?.Enabled is null)
+    {
+        return Results.BadRequest(new { error = "'enabled' is required." });
+    }
+
+    return await CallGraphAsync(async () =>
+    {
+        await subscriptions.SetAutoRenewAsync(id, body.Enabled.Value, cancellationToken);
+        return new { id, enabled = body.Enabled.Value };
+    });
+});
 
 app.MapPut("/api/subscriptions/{id}", async (
     string id,
@@ -316,7 +396,13 @@ app.MapPut("/api/subscriptions/{id}", async (
         return Results.BadRequest(new { error = NotificationUrlError });
     }
 
-    return await CallGraphAsync(() => subscriptions.UpdateAsync(id, name, body?.Days, notificationUrl, cancellationToken));
+    var clientState = string.IsNullOrWhiteSpace(body?.ClientState) ? null : body!.ClientState!.Trim();
+    if (clientState is not null && !SubscriptionManager.IsValidCustomClientState(clientState))
+    {
+        return Results.BadRequest(new { error = "'clientState' must be 16-128 characters." });
+    }
+
+    return await CallGraphAsync(() => subscriptions.UpdateAsync(id, name, body?.Days, notificationUrl, clientState, cancellationToken));
 });
 
 app.MapDelete("/api/subscriptions/{id}", (
@@ -737,13 +823,15 @@ public sealed record SearchPayload(string? Query, string? UserId, int Top = 10, 
 /// </summary>
 public sealed record SubscriptionLifetime(int? Days);
 
+public sealed record SubscriptionAutoRenewRequest(bool? Enabled);
+
 /// <summary>
 /// A new subscription. <see cref="NotificationUrl"/> overrides <c>SharePoint:NotificationUrl</c> for
 /// this subscription only and must be an absolute HTTPS URL that Microsoft Graph can reach; omit it to
 /// use the configured value. A URL other than the configured one produces a subscription the renewal
 /// service does not treat as its own.
 /// </summary>
-public sealed record CreateSubscriptionRequest(string? Name, int? Days, string? NotificationUrl);
+public sealed record CreateSubscriptionRequest(string? Name, int? Days, string? NotificationUrl, string? ClientState);
 
 /// <summary>
 /// A new conversation. <see cref="UserId"/> optionally restricts search permissions, while a null or

@@ -5,8 +5,8 @@ namespace SharePointToAzureSearch.Core;
 
 /// <summary>
 /// Carries a human-readable subscription name in Graph's clientState while authenticating that name
-/// with the configured secret. The secret itself never leaves configuration. Existing subscriptions
-/// whose clientState is the legacy raw secret remain valid.
+/// with the configured secret. Existing subscriptions whose clientState is the legacy raw secret
+/// remain valid. Custom client states are compared directly against the saved subscription value.
 /// </summary>
 public static class SubscriptionClientState
 {
@@ -31,6 +31,9 @@ public static class SubscriptionClientState
 
     public static bool IsValid(string? clientState, string secret) =>
         SecureEquals(clientState, secret) || TryGetName(clientState, secret, out _);
+
+    public static bool IsExactMatch(string? clientState, string expected) =>
+        SecureEquals(clientState, expected);
 
     public static bool TryGetName(string? clientState, string secret, out string name)
     {

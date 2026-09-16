@@ -155,6 +155,9 @@ namespace SharePointToAzureSearch.Core.Migrations
                         .HasPrecision(7)
                         .HasColumnType("datetimeoffset(7)");
 
+                    b.Property<long?>("EmbeddingTokenCount")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("ErrorMessage")
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
@@ -297,6 +300,9 @@ namespace SharePointToAzureSearch.Core.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<long?>("EmbeddingTokenCount")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(400)
@@ -349,6 +355,13 @@ namespace SharePointToAzureSearch.Core.Migrations
 
             modelBuilder.Entity("SharePointToAzureSearch.Core.Data.WebhookSubscriptionEntity", b =>
                 {
+                    b.Property<bool>("AutoRenewEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ClientState")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier")

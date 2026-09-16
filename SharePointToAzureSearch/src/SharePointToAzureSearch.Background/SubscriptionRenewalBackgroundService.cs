@@ -40,13 +40,16 @@ public sealed class SubscriptionRenewalBackgroundService(
 
     private async Task EnsureSubscriptionAsync(CancellationToken cancellationToken)
     {
-        var (action, subscription) = await subscriptions.EnsureAsync(cancellationToken);
-        var message = action switch
+        var results = await subscriptions.EnsureEnabledAsync(cancellationToken);
+        foreach (var (action, subscription) in results)
         {
-            SubscriptionAction.Created => "Created Microsoft Graph subscription {SubscriptionId}, expiring {ExpirationUtc}.",
-            SubscriptionAction.Renewed => "Renewed Microsoft Graph subscription {SubscriptionId} until {ExpirationUtc}.",
-            _ => "Microsoft Graph subscription {SubscriptionId} is active until {ExpirationUtc}."
-        };
-        logger.LogInformation(message, subscription.Id, subscription.ExpirationUtc);
+            var message = action switch
+            {
+                SubscriptionAction.Created => "Created Microsoft Graph subscription {SubscriptionId}, expiring {ExpirationUtc}.",
+                SubscriptionAction.Renewed => "Renewed Microsoft Graph subscription {SubscriptionId} until {ExpirationUtc}.",
+                _ => "Microsoft Graph subscription {SubscriptionId} is active until {ExpirationUtc}."
+            };
+            logger.LogInformation(message, subscription.Id, subscription.ExpirationUtc);
+        }
     }
 }

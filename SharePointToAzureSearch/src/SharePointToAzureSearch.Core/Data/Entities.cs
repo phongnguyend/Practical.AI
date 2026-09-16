@@ -16,6 +16,8 @@ public sealed class WebhookSubscriptionEntity
     public string? GraphSubscriptionId { get; set; }
     public string Name { get; set; } = "";
     public string NotificationUrl { get; set; } = "";
+    public string? ClientState { get; set; }
+    public bool AutoRenewEnabled { get; set; }
     public int LifetimeDays { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
@@ -56,6 +58,7 @@ public sealed class IndexedFileEntity
     public string PermissionsHash { get; set; } = "";
     public string IndexFingerprint { get; set; } = "";
     public int ChunkCount { get; set; }
+    public long? EmbeddingTokenCount { get; set; }
     public Guid ScanId { get; set; }
     public DateTimeOffset IndexedAtUtc { get; set; }
 }
@@ -118,6 +121,7 @@ public sealed class ChatMessageAttachmentFileEntity
     public long SizeBytes { get; set; }
     public UploadIndexStatus Status { get; set; }
     public int ChunkCount { get; set; }
+    public long? EmbeddingTokenCount { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }

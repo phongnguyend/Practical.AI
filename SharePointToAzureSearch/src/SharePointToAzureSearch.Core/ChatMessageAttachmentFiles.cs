@@ -30,6 +30,7 @@ public sealed record AttachmentFileRecord(
     long SizeBytes,
     UploadIndexStatus Status,
     int ChunkCount,
+    long? EmbeddingTokenCount,
     string? ErrorMessage,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
@@ -135,7 +136,7 @@ public sealed class ChatMessageAttachmentFileService(
         var total = await query.LongCountAsync(cancellationToken);
         var rows = await query.OrderByDescending(x => x.CreatedAtUtc).Skip(skip).Take(top)
             .Select(x => new AttachmentFileRecord(
-                x.Id, x.FileName, x.ContentType, x.SizeBytes, x.Status, x.ChunkCount,
+                x.Id, x.FileName, x.ContentType, x.SizeBytes, x.Status, x.ChunkCount, x.EmbeddingTokenCount,
                 x.ErrorMessage, x.CreatedAtUtc, x.UpdatedAtUtc, x.IndexedAtUtc,
                 x.ChatMessageAttachmentId,
                 x.ChatMessageAttachment != null
@@ -263,9 +264,15 @@ public sealed class ChatMessageAttachmentFileService(
             var markdown = await markItDown.ConvertAsync(row.FileName, bytes, row.ContentType, cancellationToken);
             var texts = TextChunker.Split(markdown, _uploads.ChunkSizeCharacters, _uploads.ChunkOverlapCharacters);
             var documents = new List<UploadChunkDocument>(texts.Count);
+            long? embeddingTokenCount = 0;
             for (var index = 0; index < texts.Count; index++)
             {
-                var vector = await embeddings.GenerateVectorAsync(texts[index], cancellationToken: cancellationToken);
+                var generated = await embeddings.GenerateAsync([texts[index]], cancellationToken: cancellationToken);
+                var vector = generated[0].Vector;
+                var tokens = generated.Usage?.TotalTokenCount ?? generated.Usage?.InputTokenCount;
+                embeddingTokenCount = embeddingTokenCount.HasValue && tokens.HasValue
+                    ? embeddingTokenCount.Value + tokens.Value
+                    : null;
                 documents.Add(new UploadChunkDocument
                 {
                     Id = SearchChunkKey.For("upload", id.ToString("D"), index),
@@ -286,25 +293,27 @@ public sealed class ChatMessageAttachmentFileService(
                     await Search.MergeOrUploadDocumentsAsync(batch, cancellationToken: cancellationToken);
                 }
             }
-            await SetOutcomeAsync(id, UploadIndexStatus.Indexed, documents.Count, null, cancellationToken);
+            await SetOutcomeAsync(id, UploadIndexStatus.Indexed, documents.Count, embeddingTokenCount, null, cancellationToken);
+            logger.LogInformation("Indexed attachment {UploadId} ({FileName}) as {ChunkCount} chunks using {EmbeddingTokenCount} embedding tokens.", id, row.FileName, documents.Count, embeddingTokenCount);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Indexing upload {UploadId} ({FileName}) failed.", id, row.FileName);
-            await SetOutcomeAsync(id, UploadIndexStatus.Failed, 0, ex.Message, cancellationToken);
+            await SetOutcomeAsync(id, UploadIndexStatus.Failed, 0, null, ex.Message, cancellationToken);
         }
 
         await using var resultContext = await contextFactory.CreateDbContextAsync(cancellationToken);
         return (await ListByIdAsync(resultContext, id, cancellationToken))!;
     }
 
-    private async Task SetOutcomeAsync(Guid id, UploadIndexStatus status, int chunks, string? error, CancellationToken cancellationToken)
+    private async Task SetOutcomeAsync(Guid id, UploadIndexStatus status, int chunks, long? embeddingTokenCount, string? error, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
         await context.ChatMessageAttachmentFiles.Where(x => x.Id == id).ExecuteUpdateAsync(setters => setters
             .SetProperty(x => x.Status, status)
             .SetProperty(x => x.ChunkCount, chunks)
+            .SetProperty(x => x.EmbeddingTokenCount, embeddingTokenCount)
             .SetProperty(x => x.ErrorMessage, error == null ? null : error.Length <= 4000 ? error : error[..4000])
             .SetProperty(x => x.UpdatedAtUtc, now)
             .SetProperty(x => x.IndexedAtUtc, status == UploadIndexStatus.Indexed ? now : null), cancellationToken);
@@ -385,7 +394,7 @@ public sealed class ChatMessageAttachmentFileService(
         CancellationToken cancellationToken) => context.ChatMessageAttachmentFiles.AsNoTracking()
         .Where(x => x.Id == id)
         .Select(x => new AttachmentFileRecord(
-            x.Id, x.FileName, x.ContentType, x.SizeBytes, x.Status, x.ChunkCount,
+            x.Id, x.FileName, x.ContentType, x.SizeBytes, x.Status, x.ChunkCount, x.EmbeddingTokenCount,
             x.ErrorMessage, x.CreatedAtUtc, x.UpdatedAtUtc, x.IndexedAtUtc,
             x.ChatMessageAttachmentId,
             x.ChatMessageAttachment != null

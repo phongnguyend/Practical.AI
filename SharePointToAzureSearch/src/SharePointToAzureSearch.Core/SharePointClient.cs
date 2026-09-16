@@ -76,6 +76,22 @@ public sealed class SharePointClient(
         return drive.Id ?? throw new InvalidDataException("Microsoft Graph returned a document library without an ID.");
     }
 
+    public async Task<DriveItemChange> GetItemAsync(string itemId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var driveId = await GetDriveIdAsync(cancellationToken);
+            var item = await graph.Drives[driveId].Items[itemId]
+                .GetAsync(cancellationToken: cancellationToken)
+                ?? throw new InvalidDataException("Microsoft Graph returned an empty drive item response.");
+            return ToDriveItemChange(item);
+        }
+        catch (ApiException ex)
+        {
+            throw ToHttpRequestException(ex);
+        }
+    }
+
     /// <summary>
     /// Resolves the principal tokens that grant a user access to indexed content: the user's own object ID,
     /// their mail addresses, and every group they are a transitive member of. The tokens use the same shape
@@ -154,18 +170,7 @@ public sealed class SharePointClient(
                 .GetAsDeltaGetResponseAsync(cancellationToken: cancellationToken)
                 ?? throw new InvalidDataException("Microsoft Graph returned an empty delta response.");
 
-            var items = (response.Value ?? []).Select(item => new DriveItemChange(
-                item.Id ?? throw new InvalidDataException("Microsoft Graph returned a drive item without an ID."),
-                item.Name ?? "",
-                item.WebUrl,
-                item.File?.MimeType,
-                item.Size,
-                item.LastModifiedDateTime,
-                item.ETag,
-                item.CTag,
-                item.File is not null,
-                item.Deleted is not null,
-                item.ParentReference?.Path)).ToArray();
+            var items = (response.Value ?? []).Select(ToDriveItemChange).ToArray();
 
             return new(items, response.OdataNextLink, response.OdataDeltaLink);
         }
@@ -178,6 +183,19 @@ public sealed class SharePointClient(
             throw ToHttpRequestException(ex);
         }
     }
+
+    private static DriveItemChange ToDriveItemChange(DriveItem item) => new(
+        item.Id ?? throw new InvalidDataException("Microsoft Graph returned a drive item without an ID."),
+        item.Name ?? "",
+        item.WebUrl,
+        item.File?.MimeType,
+        item.Size,
+        item.LastModifiedDateTime,
+        item.ETag,
+        item.CTag,
+        item.File is not null,
+        item.Deleted is not null,
+        item.ParentReference?.Path);
 
     public async Task<byte[]> DownloadContentAsync(string itemId, int maxBytes, CancellationToken cancellationToken)
     {

@@ -46,6 +46,7 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
             entity.Property(x => x.GraphSubscriptionId).HasMaxLength(200);
             entity.Property(x => x.Name).HasMaxLength(100).IsRequired();
             entity.Property(x => x.NotificationUrl).HasMaxLength(2000).IsRequired();
+            entity.Property(x => x.ClientState).HasMaxLength(128);
             entity.Property(x => x.CreatedAtUtc).HasPrecision(7);
             entity.Property(x => x.UpdatedAtUtc).HasPrecision(7);
             entity.HasIndex(x => x.Name).IsUnique();

@@ -26,7 +26,8 @@ public sealed record IndexedFileRow(
     string IndexFingerprint,
     int ChunkCount,
     Guid ScanId,
-    DateTimeOffset IndexedAtUtc);
+    DateTimeOffset IndexedAtUtc,
+    long? EmbeddingTokenCount);
 
 /// <summary>A row of the delta-checkpoint table, including the timestamp the worker last wrote it.</summary>
 public sealed record DeltaStateRow(
@@ -209,6 +210,7 @@ public sealed class EfIndexStateReader(IDbContextFactory<SharePointIndexDbContex
             "size" => Direction(files, f => f.SizeBytes, descending),
             "lastmodifiedutc" => Direction(files, f => f.LastModifiedUtc, descending),
             "chunkcount" => Direction(files, f => f.ChunkCount, descending),
+            "embeddingtokencount" => Direction(files, f => f.EmbeddingTokenCount, descending),
             _ => Direction(files, f => f.IndexedAtUtc, descending)
         };
         return ordered.ThenBy(f => f.ItemId);
@@ -235,7 +237,8 @@ public sealed class EfIndexStateReader(IDbContextFactory<SharePointIndexDbContex
         row.IndexFingerprint,
         row.ChunkCount,
         row.ScanId,
-        row.IndexedAtUtc);
+        row.IndexedAtUtc,
+        row.EmbeddingTokenCount);
 
     private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
