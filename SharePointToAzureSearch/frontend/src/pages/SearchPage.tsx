@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Columns3,
+  Eye,
   FileText,
   Hash,
   Layers,
@@ -15,8 +16,10 @@ import {
   Timer,
   Type,
 } from 'lucide-react'
-import { timedSearch } from '../api/client'
+import { downloadIndexedFile, timedSearch } from '../api/client'
 import { FileTypeIcon } from '../components/FileTypeIcon'
+import { OfficePreview } from '../components/OfficePreview'
+import { isPreviewableOfficeFile } from '../lib/officeFiles'
 import {
   SEARCH_MODES,
   SEARCH_MODE_DESCRIPTIONS,
@@ -321,6 +324,7 @@ function Hit({
   compact: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [preview, setPreview] = useState(false)
 
   return (
     <div className="hit">
@@ -344,6 +348,9 @@ function Hit({
         </span>
         {!compact && hit.path ? <span title={hit.path}>{folderLabel(hit.path)}</span> : null}
         {!compact ? <span>{formatBytes(hit.size)}</span> : null}
+        {isPreviewableOfficeFile(hit.name) ? (
+          <button className="ghost" onClick={() => setPreview(true)}><Eye size={12} />Preview</button>
+        ) : null}
       </div>
       <div
         className={expanded ? 'hit-snippet expanded' : 'hit-snippet'}
@@ -352,6 +359,14 @@ function Hit({
       >
         {highlight(hit.content, terms)}
       </div>
+      {preview ? (
+        <OfficePreview
+          name={hit.name}
+          sourceKey={`${hit.driveId}:${hit.itemId}`}
+          load={(signal) => downloadIndexedFile(hit, signal)}
+          onClose={() => setPreview(false)}
+        />
+      ) : null}
     </div>
   )
 }

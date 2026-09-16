@@ -23,6 +23,13 @@ back button steps through searches. So is the open conversation
 
 ## Running it
 
+DOCX, XLSX, and PPTX files can be opened in the app from Search results, the Indexed files detail panel,
+the Attachment files page, or a chat message attachment. The preview downloads the file bytes to the browser
+and offers a save button. Indexed-file previews fetch the current SharePoint version and are limited by
+`Downloads:MaxFileBytes` (20 MB by default). XLSX sheets show 50 rows and 26 columns at a time, with
+tabs to select worksheets and controls to move through larger sheets. The grid displays common cell
+formatting, number formats, column widths, row heights, and merged cells.
+
 The API must be running first. From `src/SharePointToAzureSearch.Api`:
 
 ```bash
@@ -63,9 +70,11 @@ Read-only endpoints added alongside the existing search ones:
 - `GET /api/state/summary`
 - `GET /api/state/indexed-files?search=&driveId=&sort=&desc=&skip=&top=`
 - `GET /api/state/indexed-files/{driveId}/{itemId}`
+- `GET /api/state/indexed-files/{driveId}/{itemId}/content` (current Office bytes from SharePoint)
 - `GET /api/state/delta`
 
-They read the database at `SqlServer:ConnectionString` and never write to it. A table that does not
+They read the database at `SqlServer:ConnectionString` and never write to it. The content endpoint also
+reads the configured SharePoint library through Microsoft Graph. A table that does not
 exist yet reads as empty, so the viewer works before the worker's first pass.
 
 The Chat page uses, and these **write to the database and call Azure OpenAI**:
@@ -84,5 +93,5 @@ The Subscriptions page additionally uses, and these **change tenant state**:
 - `DELETE /api/subscriptions/{id}` — refused for the default subscription
 
 **Every one of these endpoints is unauthenticated, like the search endpoints. Between them they expose
-the whole index and all indexed metadata, and let any caller delete the webhook subscription.** Put
+the whole index, indexed metadata, and original Office files, and let any caller delete the webhook subscription.** Put
 authentication in front of the API before exposing it anywhere but a development machine.

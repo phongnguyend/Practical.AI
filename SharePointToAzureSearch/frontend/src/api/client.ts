@@ -122,6 +122,29 @@ export function createConversation(options?: {
   })
 }
 
+async function downloadBlob(path: string, signal?: AbortSignal): Promise<Blob> {
+  let response: Response
+  try {
+    response = await fetch(`${BASE_URL}${path}`, { signal })
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') throw cause
+    throw new ApiError('Could not reach the API. Is SharePointToAzureSearch.Api running?', null)
+  }
+  if (!response.ok) throw await toError(response)
+  return response.blob()
+}
+
+export function downloadIndexedFile(file: Pick<IndexedFileRow, 'driveId' | 'itemId'>, signal?: AbortSignal): Promise<Blob> {
+  return downloadBlob(
+    `/api/state/indexed-files/${encodeURIComponent(file.driveId)}/${encodeURIComponent(file.itemId)}/content`,
+    signal,
+  )
+}
+
+export function downloadAttachmentFile(id: string, signal?: AbortSignal): Promise<Blob> {
+  return downloadBlob(`/api/attachment-files/${encodeURIComponent(id)}/download`, signal)
+}
+
 export function branchConversation(
   conversationId: string,
   messageId: string,

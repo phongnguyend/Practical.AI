@@ -8,6 +8,7 @@ import {
   Copy,
   Cpu,
   ExternalLink,
+  Eye,
   GitBranch,
   MessageSquare,
   Plus,
@@ -32,10 +33,13 @@ import {
   setMessageFeedback,
   uploadAttachmentFile,
   attachmentFileDownloadUrl,
+  downloadAttachmentFile,
 } from '../api/client'
 import type { ChatConversation, ChatFeedback, ChatMessage, ChatMessageAttachment } from '../api/types'
 import { Empty, ErrorBanner, Field, LoadingBar, Modal } from '../components/ui'
 import { FileTypeIcon } from '../components/FileTypeIcon'
+import { OfficePreview } from '../components/OfficePreview'
+import { isPreviewableOfficeFile } from '../lib/officeFiles'
 import {
   folderLabel,
   formatDateTime,
@@ -593,6 +597,7 @@ function MessageBubble({
   onFeedback: (id: string, feedback: ChatFeedback | null) => void
   onBranch: (id: string) => Promise<void>
 }) {
+  const [preview, setPreview] = useState<ChatMessageAttachment | null>(null)
   const isUser = message.role === 'User'
   const classes = [
     'chat-message',
@@ -614,11 +619,19 @@ function MessageBubble({
         {message.attachments.length > 0 ? (
           <div className="message-attachments">
             {message.attachments.map((file) => (
-              <a href={attachmentFileDownloadUrl(file.id)} key={file.id} title={`Download ${file.fileName}`}>
-                <FileTypeIcon name={file.fileName} mimeType={file.contentType} size={14} />
-                <span>{file.fileName}</span>
-                <Download size={12} />
-              </a>
+              isPreviewableOfficeFile(file.fileName) ? (
+                <button key={file.id} onClick={() => setPreview(file)} title={`Preview ${file.fileName}`}>
+                  <FileTypeIcon name={file.fileName} mimeType={file.contentType} size={14} />
+                  <span>{file.fileName}</span>
+                  <Eye size={12} />
+                </button>
+              ) : (
+                <a href={attachmentFileDownloadUrl(file.id)} key={file.id} title={`Download ${file.fileName}`}>
+                  <FileTypeIcon name={file.fileName} mimeType={file.contentType} size={14} />
+                  <span>{file.fileName}</span>
+                  <Download size={12} />
+                </a>
+              )
             ))}
           </div>
         ) : null}
@@ -642,6 +655,15 @@ function MessageBubble({
         </div>
         {message.citations.length > 0 ? <Citations citations={message.citations} /> : null}
       </div>
+      {preview ? (
+        <OfficePreview
+          key={preview.id}
+          name={preview.fileName}
+          sourceKey={preview.id}
+          load={(signal) => downloadAttachmentFile(preview.id, signal)}
+          onClose={() => setPreview(null)}
+        />
+      ) : null}
     </div>
   )
 }

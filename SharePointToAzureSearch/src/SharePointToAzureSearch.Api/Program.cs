@@ -122,6 +122,62 @@ app.MapGet("/api/state/indexed-files/{driveId}/{itemId}", async (
     return file is null ? Results.NotFound() : Results.Ok(file);
 });
 
+// The browser downloads the original Office bytes and renders them locally. Only indexed files in the
+// configured library can be requested, and the existing download limit bounds the response in memory.
+app.MapGet("/api/state/indexed-files/{driveId}/{itemId}/content", async (
+    string driveId,
+    string itemId,
+    HttpContext context,
+    IIndexStateReader reader,
+    SharePointClient sharePointClient,
+    IOptions<DownloadOptions> downloadOptions,
+    CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var file = await reader.GetFileAsync(driveId, itemId, cancellationToken);
+    if (file is null)
+    {
+        return Results.NotFound(new { error = "Indexed file not found." });
+    }
+
+    var extension = Path.GetExtension(file.Name);
+    var contentType = extension.ToLowerInvariant() switch
+    {
+        ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        _ => null
+    };
+    if (contentType is null)
+    {
+        return Results.BadRequest(new { error = "Preview supports DOCX, XLSX, and PPTX files." });
+    }
+
+    try
+    {
+        if (!string.Equals(driveId, await sharePointClient.GetDriveIdAsync(cancellationToken), StringComparison.Ordinal))
+        {
+            return Results.NotFound(new { error = "File is outside the configured SharePoint library." });
+        }
+
+        var bytes = await sharePointClient.DownloadContentAsync(itemId, downloadOptions.Value.MaxFileBytes, cancellationToken);
+        return Results.File(bytes, contentType);
+    }
+    catch (FileTooLargeException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status413PayloadTooLarge);
+    }
+    catch (HttpRequestException ex)
+    {
+        if (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return Results.NotFound(new { error = "File no longer exists in SharePoint." });
+        }
+        return Results.Json(new { error = $"Microsoft Graph rejected the request: {ex.Message}" },
+            statusCode: StatusCodes.Status502BadGateway);
+    }
+});
+
 app.MapGet("/api/state/delta", (
     IIndexStateReader reader,
     CancellationToken cancellationToken) => reader.ListDeltaStateAsync(cancellationToken));

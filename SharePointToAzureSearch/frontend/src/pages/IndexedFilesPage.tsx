@@ -3,14 +3,17 @@ import {
   ArrowDown,
   ArrowUp,
   ExternalLink,
+  Eye,
   FileText,
   ListFilter,
   RefreshCw,
   SearchX,
   X,
 } from 'lucide-react'
-import { listIndexedFiles } from '../api/client'
+import { downloadIndexedFile, listIndexedFiles } from '../api/client'
 import { FileTypeIcon } from '../components/FileTypeIcon'
+import { OfficePreview } from '../components/OfficePreview'
+import { isPreviewableOfficeFile } from '../lib/officeFiles'
 import type { IndexedFileRow, SortKey } from '../api/types'
 import { CopyButton, Empty, ErrorBanner, Field, LoadingBar, Pagination } from '../components/ui'
 import {
@@ -46,6 +49,7 @@ export default function IndexedFilesPage() {
   const [skip, setSkip] = useState(0)
   const [top, setTop] = useState(25)
   const [selected, setSelected] = useState<IndexedFileRow | null>(null)
+  const [preview, setPreview] = useState<IndexedFileRow | null>(null)
 
   const debouncedSearch = useDebounced(search)
   const debouncedDriveId = useDebounced(driveId)
@@ -240,13 +244,22 @@ export default function IndexedFilesPage() {
           )}
         </div>
 
-        {selected ? <FileDetail file={selected} onClose={() => setSelected(null)} /> : null}
+        {selected ? <FileDetail file={selected} onClose={() => setSelected(null)} onPreview={() => setPreview(selected)} /> : null}
       </div>
+      {preview ? (
+        <OfficePreview
+          key={`${preview.driveId}:${preview.itemId}`}
+          name={preview.name}
+          sourceKey={`${preview.driveId}:${preview.itemId}`}
+          load={(signal) => downloadIndexedFile(preview, signal)}
+          onClose={() => setPreview(null)}
+        />
+      ) : null}
     </div>
   )
 }
 
-function FileDetail({ file, onClose }: { file: IndexedFileRow; onClose: () => void }) {
+function FileDetail({ file, onClose, onPreview }: { file: IndexedFileRow; onClose: () => void; onPreview: () => void }) {
   return (
     <div className="card">
       <div className="card-head">
@@ -268,6 +281,13 @@ function FileDetail({ file, onClose }: { file: IndexedFileRow; onClose: () => vo
               <span>{file.name}</span>
             </span>
           </dd>
+
+          {isPreviewableOfficeFile(file.name) ? (
+            <>
+              <dt>Preview</dt>
+              <dd><button onClick={onPreview}><Eye size={14} />Preview</button></dd>
+            </>
+          ) : null}
 
           <dt>Folder</dt>
           <dd title={file.parentPath ?? undefined}>{folderLabel(file.parentPath)}</dd>

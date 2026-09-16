@@ -1335,7 +1335,8 @@ button.ghost:hover:not(:disabled) {
 }
 
 .chat-attachment-chip,
-.message-attachments a {
+.message-attachments a,
+.message-attachments button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1351,7 +1352,8 @@ button.ghost:hover:not(:disabled) {
 }
 
 .chat-attachment-chip > span,
-.message-attachments a > span {
+.message-attachments a > span,
+.message-attachments button > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1371,7 +1373,8 @@ button.ghost:hover:not(:disabled) {
   justify-content: flex-end;
 }
 
-.message-attachments a:hover {
+.message-attachments a:hover,
+.message-attachments button:hover {
   color: var(--accent);
   border-color: var(--accent);
 }
@@ -1778,6 +1781,96 @@ button.ghost:hover:not(:disabled) {
   gap: 20px;
   align-items: start;
 }
+
+/* ---------- Office file preview ---------- */
+
+.office-dialog::backdrop {
+  background: rgb(0 0 0 / 65%);
+}
+
+.office-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  width: min(1200px, calc(100vw - 40px));
+  height: min(900px, calc(100vh - 40px));
+  min-width: min(360px, calc(100vw - 24px));
+  min-height: min(260px, calc(100vh - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  padding: 0;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 70px rgb(0 0 0 / 25%);
+  overflow: auto;
+  resize: both;
+}
+
+.office-dialog--pptx[open] {
+  width: min(1490px, calc(100vw - 40px));
+}
+
+.office-dialog--xlsx[open] {
+  width: calc(100vw - 24px);
+  height: calc(100vh - 24px);
+}
+
+.office-toolbar,
+.office-sheet-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.office-toolbar strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.office-message { padding: 24px; color: var(--text-secondary); }
+.office-word { min-height: 100%; background: #e5e7eb; padding: 20px; }
+.office-dialog--pptx .office-content { overflow: hidden; }
+.office-presentation { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.office-presentation-body { display: flex; flex: 1; min-height: 0; }
+.office-thumbnail-list { flex: 0 0 188px; overflow-y: auto; padding: 12px; border-right: 1px solid var(--border); background: var(--surface-2); scrollbar-width: thin; }
+.office-thumbnail { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; margin-bottom: 8px; padding: 7px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-secondary); font-size: 12px; }
+.office-thumbnail:hover { background: var(--surface-1); }
+.office-thumbnail[aria-current="page"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.office-thumbnail-preview { width: 100%; overflow: hidden; background: #fff; box-shadow: 0 1px 5px rgb(0 0 0 / 18%); pointer-events: none; }
+.office-slide-stage { flex: 1; min-width: 0; overflow: auto; }
+.office-slides { width: calc(100% - 40px); margin: 20px auto; }
+.office-slide-controls { flex: none; display: flex; align-items: center; justify-content: center; gap: 16px; padding: 10px; border-top: 1px solid var(--border); background: var(--surface-1); }
+.office-slide-controls span { font-size: 12px; color: var(--text-secondary); }
+@media (max-width: 600px) {
+  .office-thumbnail-list { flex-basis: 124px; padding: 6px; }
+  .office-thumbnail { padding: 4px; }
+  .office-slides { width: calc(100% - 20px); margin: 10px auto; }
+}
+.office-excel { display: flex; flex-direction: column; height: 100%; }
+.office-excel .office-sheet-controls:first-child { padding: 0 14px; }
+.office-excel .office-sheet-controls:last-child { border-top: 1px solid var(--border); border-bottom: 0; flex-wrap: wrap; }
+.office-sheet-controls span { color: var(--text-secondary); font-size: 12px; }
+.office-sheet-tabs { display: flex; flex: 1; min-width: 0; overflow-x: auto; gap: 4px; scrollbar-width: thin; }
+.office-sheet-tabs .office-sheet-tab { display: block; flex: none; max-width: 240px; padding: 11px 14px 9px; overflow: hidden; text-overflow: ellipsis; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; text-align: left; }
+.office-sheet-tabs .office-sheet-tab:hover { background: var(--surface-2); }
+.office-sheet-tabs .office-sheet-tab[aria-selected="true"] { background: var(--accent-soft); border-bottom-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.office-sheet-summary { flex: none; white-space: nowrap; }
+.office-grid-scroll { flex: 1; min-height: 0; overflow: auto; }
+.office-grid { border-collapse: separate; border-spacing: 0; table-layout: fixed; background: #fff; color: #111827; font-size: 12px; }
+.office-grid th, .office-grid td { box-sizing: border-box; padding: 5px 8px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.office-grid th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); text-align: center; }
+.office-grid tr > th:first-child { position: sticky; left: 0; z-index: 2; width: 50px; }
 
 @media (max-width: 1080px) {
   .split {

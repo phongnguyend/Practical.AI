@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Download, MessageSquare, Paperclip, RefreshCw, RotateCw, SearchX, Trash2, X } from 'lucide-react'
+import { Download, Eye, MessageSquare, Paperclip, RefreshCw, RotateCw, SearchX, Trash2, X } from 'lucide-react'
 import {
   attachmentFileDownloadUrl,
+  downloadAttachmentFile,
   deleteOrphanAttachmentFile,
   listAttachmentFiles,
   reindexAttachmentFile,
@@ -10,6 +11,8 @@ import {
 import type { UploadIndexStatus } from '../api/types'
 import { Empty, ErrorBanner, LoadingBar, Pagination } from '../components/ui'
 import { FileTypeIcon } from '../components/FileTypeIcon'
+import { OfficePreview } from '../components/OfficePreview'
+import { isPreviewableOfficeFile } from '../lib/officeFiles'
 import { formatBytes, formatDateTime, formatRelative } from '../lib/format'
 import { useAsync, useDebounced } from '../lib/useAsync'
 
@@ -33,6 +36,7 @@ export default function AttachmentFilesPage() {
   const [working, setWorking] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [preview, setPreview] = useState<{ id: string; name: string } | null>(null)
   const debouncedSearch = useDebounced(search)
   const page = useAsync(
     (signal) => listAttachmentFiles({ search: debouncedSearch, skip, top: 25 }, signal),
@@ -126,6 +130,9 @@ export default function AttachmentFilesPage() {
                       <td>
                         <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
                           <a className="button-link" href={attachmentFileDownloadUrl(file.id)}><Download size={13} />Download</a>
+                          {isPreviewableOfficeFile(file.fileName) ? (
+                            <button onClick={() => setPreview({ id: file.id, name: file.fileName })}><Eye size={13} />Preview</button>
+                          ) : null}
                           <button disabled={working === file.id} onClick={() => void reindex(file.id)}>
                             <RotateCw size={13} />{working === file.id ? 'Indexing…' : 'Reindex'}
                           </button>
@@ -156,6 +163,15 @@ export default function AttachmentFilesPage() {
           <Empty title="No attachment files" icon={<SearchX size={26} strokeWidth={1.5} />} detail="Files attached in chat will appear here." />
         )}
       </div>
+      {preview ? (
+        <OfficePreview
+          key={preview.id}
+          name={preview.name}
+          sourceKey={preview.id}
+          load={(signal) => downloadAttachmentFile(preview.id, signal)}
+          onClose={() => setPreview(null)}
+        />
+      ) : null}
     </div>
   )
 }
