@@ -605,10 +605,9 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
     }
 
     var content = body.Content.Trim();
-    string attachmentContext;
     try
     {
-        attachmentContext = await attachmentFiles.GetAttachmentContextAsync(attachmentFileIds, content, cancellationToken);
+        await attachmentFiles.ValidateReadyAsync(attachmentFileIds, cancellationToken);
     }
     catch (InvalidOperationException ex)
     {
@@ -665,12 +664,12 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
     try
     {
         turn = await agent.RunStreamingAsync(
+            id,
             history,
-            content,
+            question,
             conversation.UserId,
             selectedAgent.ModelId,
             selectedAgent.Instructions,
-            attachmentContext,
             (text, token) => WriteEventAsync(new ChatStreamEvent("delta", Text: text), token),
             (status, token) => WriteEventAsync(new ChatStreamEvent("status", Message: status), token),
             cancellationToken);

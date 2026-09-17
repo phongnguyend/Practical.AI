@@ -45,6 +45,9 @@ public sealed record AttachmentFilePage(long TotalCount, IReadOnlyList<Attachmen
 
 public sealed record AttachmentFileDownload(Stream Content, string FileName, string ContentType);
 
+public sealed record AttachmentSearchHit(Guid AttachmentId, string FileName, int ChunkNumber, string Content, double? Score);
+public sealed record ConversationAttachmentReference(Guid AttachmentId, string FileName);
+
 public sealed class UploadTooLargeException(long maximumBytes)
     : InvalidOperationException($"The file exceeds the {maximumBytes:N0}-byte upload limit.");
 
@@ -191,57 +194,112 @@ public sealed class ChatMessageAttachmentFileService(
         return true;
     }
 
-    public async Task<string> GetAttachmentContextAsync(
+    public async Task ValidateReadyAsync(
         IReadOnlyCollection<Guid> uploadIds,
-        string query,
         CancellationToken cancellationToken)
     {
         if (uploadIds.Count == 0)
         {
-            return "";
+            return;
         }
 
         var distinctIds = uploadIds.Distinct().ToArray();
-        await using (var context = await contextFactory.CreateDbContextAsync(cancellationToken))
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var ready = await context.ChatMessageAttachmentFiles.AsNoTracking()
+            .Where(x => distinctIds.Contains(x.Id)
+                        && x.Status == UploadIndexStatus.Indexed
+                        && x.ChatMessageAttachmentId == null
+                        && !x.MessageAttachments.Any())
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+        if (ready.Count != distinctIds.Length)
         {
-            var ready = await context.ChatMessageAttachmentFiles.AsNoTracking()
-                .Where(x => distinctIds.Contains(x.Id)
-                            && x.Status == UploadIndexStatus.Indexed
-                            && x.ChatMessageAttachmentId == null
-                            && !x.MessageAttachments.Any())
-                .Select(x => x.Id)
-                .ToListAsync(cancellationToken);
-            if (ready.Count != distinctIds.Length)
-            {
-                throw new InvalidOperationException(
-                    "Every attachment file must be indexed successfully and not already linked to a message.");
-            }
+            throw new InvalidOperationException(
+                "Every attachment file must be indexed successfully and not already linked to a message.");
+        }
+    }
+
+    public async Task<IReadOnlyList<ConversationAttachmentReference>> ListConversationAttachmentsAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken)
+    {
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await context.ChatMessageAttachments.AsNoTracking()
+            .Where(x => x.Message!.ConversationId == conversationId
+                        && x.AttachmentFile!.Status == UploadIndexStatus.Indexed)
+            .Select(x => new { AttachmentId = x.AttachmentFileId, FileName = x.AttachmentFile!.FileName })
+            .Distinct()
+            .OrderBy(x => x.FileName)
+            .ThenBy(x => x.AttachmentId)
+            .ToListAsync(cancellationToken);
+        return rows.Select(x => new ConversationAttachmentReference(x.AttachmentId, x.FileName)).ToArray();
+    }
+
+    public async Task<IReadOnlyList<AttachmentSearchHit>> SearchConversationAsync(
+        Guid conversationId,
+        string query,
+        int top,
+        Guid? attachmentId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return [];
+        }
+
+        // The conversation ID comes from the server's current chat turn, not from the tool arguments.
+        // Only files linked to messages in that conversation may contribute search results.
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var linkedAttachments = context.ChatMessageAttachments.AsNoTracking()
+            .Where(x => x.Message!.ConversationId == conversationId
+                        && x.AttachmentFile!.Status == UploadIndexStatus.Indexed);
+        if (attachmentId is { } selectedId)
+        {
+            linkedAttachments = linkedAttachments.Where(x => x.AttachmentFileId == selectedId);
+        }
+        var attachmentIds = await linkedAttachments
+            .Select(x => x.AttachmentFileId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        if (attachmentIds.Count == 0)
+        {
+            return [];
         }
 
         await EnsureInfrastructureAsync(cancellationToken);
-        var values = string.Join(',', distinctIds.Select(x => x.ToString("D")));
+        var count = Math.Clamp(top, 1, 10);
         var vector = await embeddings.GenerateVectorAsync(query, cancellationToken: cancellationToken);
-        var options = new Azure.Search.Documents.SearchOptions
+        var hits = new List<AttachmentSearchHit>();
+        foreach (var batch in attachmentIds.Chunk(100))
         {
-            Filter = $"search.in(uploadId, '{values}', ',')",
-            Size = 16,
-            VectorSearch = new VectorSearchOptions
+            var values = string.Join(',', batch.Select(id => id.ToString("D")));
+            var options = new Azure.Search.Documents.SearchOptions
             {
-                Queries = { new VectorizedQuery(vector) { KNearestNeighborsCount = 16, Fields = { "contentVector" } } }
-            }
-        };
-        options.Select.Add("uploadId");
-        options.Select.Add("name");
-        options.Select.Add("chunkNumber");
-        options.Select.Add("content");
+                Filter = $"search.in(uploadId, '{values}', ',')",
+                Size = count,
+                VectorSearch = new VectorSearchOptions
+                {
+                    Queries = { new VectorizedQuery(vector) { KNearestNeighborsCount = count, Fields = { "contentVector" } } }
+                }
+            };
+            options.Select.Add("uploadId");
+            options.Select.Add("name");
+            options.Select.Add("chunkNumber");
+            options.Select.Add("content");
 
-        var response = await Search.SearchAsync<UploadChunkDocument>(query, options, cancellationToken);
-        var excerpts = new List<string>();
-        await foreach (var result in response.Value.GetResultsAsync())
-        {
-            excerpts.Add($"### {result.Document.Name} (chunk {result.Document.ChunkNumber})\n{result.Document.Content}");
+            var response = await Search.SearchAsync<UploadChunkDocument>(query, options, cancellationToken);
+            await foreach (var result in response.Value.GetResultsAsync())
+            {
+                if (Guid.TryParse(result.Document.UploadId, out var id) && batch.Contains(id))
+                {
+                    hits.Add(new AttachmentSearchHit(
+                        id, result.Document.Name, result.Document.ChunkNumber,
+                        result.Document.Content, result.Score));
+                }
+            }
         }
-        return string.Join("\n\n", excerpts);
+
+        return hits.OrderByDescending(hit => hit.Score).Take(count).ToArray();
     }
 
     private async Task<AttachmentFileRecord> IndexAsync(Guid id, CancellationToken cancellationToken)
