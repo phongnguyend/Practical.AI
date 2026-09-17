@@ -153,6 +153,13 @@ export function downloadIndexedFile(file: Pick<IndexedFileRow, 'driveId' | 'item
   )
 }
 
+export function getIndexedFileMarkdown(file: Pick<IndexedFileRow, 'driveId' | 'itemId'>, signal?: AbortSignal): Promise<{ markdown: string }> {
+  return request<{ markdown: string }>(
+    `/api/state/indexed-files/${encodeURIComponent(file.driveId)}/${encodeURIComponent(file.itemId)}/markdown`,
+    { signal },
+  )
+}
+
 export function reindexIndexedFile(file: Pick<IndexedFileRow, 'driveId' | 'itemId'>): Promise<IndexedFileRow> {
   return request<IndexedFileRow>(
     `/api/state/indexed-files/${encodeURIComponent(file.driveId)}/${encodeURIComponent(file.itemId)}/reindex`,
@@ -162,6 +169,10 @@ export function reindexIndexedFile(file: Pick<IndexedFileRow, 'driveId' | 'itemI
 
 export function downloadAttachmentFile(id: string, signal?: AbortSignal): Promise<Blob> {
   return downloadBlob(`/api/attachment-files/${encodeURIComponent(id)}/download`, signal)
+}
+
+export function getAttachmentFileMarkdown(id: string, signal?: AbortSignal): Promise<{ markdown: string }> {
+  return request<{ markdown: string }>(`/api/attachment-files/${encodeURIComponent(id)}/markdown`, { signal })
 }
 
 export function branchConversation(

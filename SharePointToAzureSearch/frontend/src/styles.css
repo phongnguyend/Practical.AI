@@ -1850,6 +1850,18 @@ button.ghost:hover:not(:disabled) {
 }
 
 .office-message { padding: 24px; color: var(--text-secondary); }
+.markdown-preview-tabs { display: flex; gap: 4px; padding: 8px 14px 0; border-bottom: 1px solid var(--border); }
+.markdown-preview-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--text-secondary); padding: 9px 14px; }
+.markdown-preview-tabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--text-primary); font-weight: 600; }
+.markdown-preview-content { padding: 20px 24px; }
+.markdown-preview-content--plain { display: flex; overflow: hidden; }
+.markdown-preview-source { flex: 1; min-width: 0; min-height: 0; margin: 0; padding: 0; border: 0; resize: none; background: transparent; font: 13px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre; }
+.markdown-preview-rendered { max-width: 100%; line-height: 1.6; overflow-wrap: anywhere; }
+.markdown-preview-rendered h1 { font-size: 24px; }
+.markdown-preview-rendered h2 { font-size: 20px; }
+.markdown-preview-rendered h3 { font-size: 17px; }
+.markdown-preview-rendered img { max-width: 100%; }
+.markdown-preview-rendered table { display: block; overflow-x: auto; max-width: 100%; }
 .office-word { min-height: 100%; background: #e5e7eb; padding: 20px; }
 .office-dialog--pptx .office-content { overflow: hidden; }
 .office-presentation { display: flex; flex-direction: column; height: 100%; min-height: 0; }

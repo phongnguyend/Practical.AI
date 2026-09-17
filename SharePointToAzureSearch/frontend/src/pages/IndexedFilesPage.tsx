@@ -12,9 +12,10 @@ import {
   SearchX,
   X,
 } from 'lucide-react'
-import { downloadIndexedFile, listIndexedFiles, reindexIndexedFile } from '../api/client'
+import { downloadIndexedFile, getIndexedFileMarkdown, listIndexedFiles, reindexIndexedFile } from '../api/client'
 import { FileTypeIcon } from '../components/FileTypeIcon'
 import { OfficePreview } from '../components/OfficePreview'
+import { MarkdownPreview } from '../components/MarkdownPreview'
 import { isPreviewableOfficeFile } from '../lib/officeFiles'
 import type { IndexedFileRow, SortKey } from '../api/types'
 import { CopyButton, Empty, ErrorBanner, Field, LoadingBar, Pagination } from '../components/ui'
@@ -32,14 +33,14 @@ import { useAsync, useDebounced } from '../lib/useAsync'
 // Widths are shares of the table, which is laid out fixed so that a long folder path or content type
 // is ellipsised rather than widening the table past its card.
 const COLUMNS: { key: SortKey; label: string; width: string; numeric?: boolean }[] = [
-  { key: 'name', label: 'Name', width: '18%' },
-  { key: 'path', label: 'Folder', width: '13%' },
-  { key: 'mimeType', label: 'Content type', width: '11%' },
-  { key: 'size', label: 'Size', width: '7%', numeric: true },
-  { key: 'chunkCount', label: 'Chunks', width: '7%', numeric: true },
-  { key: 'embeddingTokenCount', label: 'Tokens', width: '9%', numeric: true },
-  { key: 'lastModifiedUtc', label: 'Modified', width: '12.5%', numeric: true },
-  { key: 'indexedAtUtc', label: 'Indexed', width: '12.5%', numeric: true },
+  { key: 'name', label: 'Name', width: '17%' },
+  { key: 'path', label: 'Folder', width: '11%' },
+  { key: 'mimeType', label: 'Content type', width: '10%' },
+  { key: 'size', label: 'Size', width: '6%', numeric: true },
+  { key: 'chunkCount', label: 'Chunks', width: '6%', numeric: true },
+  { key: 'embeddingTokenCount', label: 'Tokens', width: '8%', numeric: true },
+  { key: 'lastModifiedUtc', label: 'Modified', width: '12%', numeric: true },
+  { key: 'indexedAtUtc', label: 'Indexed', width: '12%', numeric: true },
 ]
 
 const PAGE_SIZES = [10, 25, 50, 100]
@@ -53,6 +54,7 @@ export default function IndexedFilesPage() {
   const [top, setTop] = useState(25)
   const [selected, setSelected] = useState<IndexedFileRow | null>(null)
   const [preview, setPreview] = useState<IndexedFileRow | null>(null)
+  const [markdownFile, setMarkdownFile] = useState<IndexedFileRow | null>(null)
   const [reindexingKey, setReindexingKey] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -180,12 +182,12 @@ export default function IndexedFilesPage() {
                 <span className="hint">Select a row for details</span>
               </div>
               <div className="table-scroll">
-                <table className="table-fixed" style={{ minWidth: 900 }}>
+                <table className="table-fixed" style={{ minWidth: 1050 }}>
                   <colgroup>
                     {COLUMNS.map((column) => (
                       <col key={column.key} style={{ width: column.width }} />
                     ))}
-                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '18%' }} />
                   </colgroup>
                   <thead>
                     <tr>
@@ -254,16 +256,21 @@ export default function IndexedFilesPage() {
                             {formatRelative(file.indexedAtUtc)}
                           </td>
                           <td>
-                            <button
-                              disabled={reindexingKey !== null}
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                void reindex(file)
-                              }}
-                            >
-                              <RotateCw size={13} />
-                              {reindexingKey === key ? 'Indexing…' : 'Reindex'}
-                            </button>
+                            <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                              <button onClick={(event) => { event.stopPropagation(); setMarkdownFile(file) }}>
+                                <FileText size={13} />View Markdown
+                              </button>
+                              <button
+                                disabled={reindexingKey !== null}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  void reindex(file)
+                                }}
+                              >
+                                <RotateCw size={13} />
+                                {reindexingKey === key ? 'Indexing…' : 'Reindex'}
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       )
@@ -297,6 +304,15 @@ export default function IndexedFilesPage() {
           sourceKey={`${preview.driveId}:${preview.itemId}`}
           load={(signal) => downloadIndexedFile(preview, signal)}
           onClose={() => setPreview(null)}
+        />
+      ) : null}
+      {markdownFile ? (
+        <MarkdownPreview
+          key={`${markdownFile.driveId}:${markdownFile.itemId}`}
+          name={markdownFile.name}
+          sourceKey={`${markdownFile.driveId}:${markdownFile.itemId}`}
+          load={(signal) => getIndexedFileMarkdown(markdownFile, signal)}
+          onClose={() => setMarkdownFile(null)}
         />
       ) : null}
     </div>

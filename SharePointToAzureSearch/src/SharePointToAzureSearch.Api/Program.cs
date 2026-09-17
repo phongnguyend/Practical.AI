@@ -218,6 +218,44 @@ app.MapGet("/api/state/indexed-files/{driveId}/{itemId}/content", async (
     }
 });
 
+app.MapGet("/api/state/indexed-files/{driveId}/{itemId}/markdown", async (
+    string driveId,
+    string itemId,
+    HttpContext context,
+    IIndexStateReader reader,
+    SharePointClient sharePointClient,
+    MarkItDownClient markItDown,
+    IOptions<DownloadOptions> downloadOptions,
+    CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var file = await reader.GetFileAsync(driveId, itemId, cancellationToken);
+    if (file is null)
+    {
+        return Results.NotFound(new { error = "Indexed file not found." });
+    }
+
+    try
+    {
+        if (!string.Equals(driveId, await sharePointClient.GetDriveIdAsync(cancellationToken), StringComparison.Ordinal))
+        {
+            return Results.NotFound(new { error = "File is outside the configured SharePoint library." });
+        }
+
+        var bytes = await sharePointClient.DownloadContentAsync(itemId, downloadOptions.Value.MaxFileBytes, cancellationToken);
+        var markdown = await markItDown.ConvertAsync(file.Name, bytes, file.MimeType, cancellationToken);
+        return Results.Ok(new { markdown });
+    }
+    catch (FileTooLargeException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status413PayloadTooLarge);
+    }
+    catch (HttpRequestException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status502BadGateway);
+    }
+});
+
 app.MapGet("/api/state/delta", (
     IIndexStateReader reader,
     CancellationToken cancellationToken) => reader.ListDeltaStateAsync(cancellationToken));
@@ -288,6 +326,30 @@ app.MapGet("/api/attachment-files/{id:guid}/download", async (
     return file is null
         ? Results.NotFound()
         : Results.Stream(file.Content, file.ContentType, file.FileName, enableRangeProcessing: true);
+});
+
+app.MapGet("/api/attachment-files/{id:guid}/markdown", async (
+    Guid id,
+    HttpContext context,
+    ChatMessageAttachmentFileService files,
+    CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    try
+    {
+        var markdown = await files.ConvertToMarkdownAsync(id, cancellationToken);
+        return markdown is null
+            ? Results.NotFound(new { error = "Attachment file not found." })
+            : Results.Ok(new { markdown });
+    }
+    catch (UploadTooLargeException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status413PayloadTooLarge);
+    }
+    catch (HttpRequestException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status502BadGateway);
+    }
 });
 
 app.MapPost("/api/attachment-files/{id:guid}/reindex", async (

@@ -168,6 +168,29 @@ public sealed class ChatMessageAttachmentFileService(
         return new AttachmentFileDownload(response.Value.Content, row.FileName, row.ContentType ?? "application/octet-stream");
     }
 
+    public async Task<string?> ConvertToMarkdownAsync(Guid id, CancellationToken cancellationToken)
+    {
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var row = await context.ChatMessageAttachmentFiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (row is null)
+        {
+            return null;
+        }
+        if (row.SizeBytes > _uploads.MaxFileBytes)
+        {
+            throw new UploadTooLargeException(_uploads.MaxFileBytes);
+        }
+
+        var blob = await Container.GetBlobClient(row.BlobName).DownloadContentAsync(cancellationToken);
+        var bytes = blob.Value.Content.ToArray();
+        if (bytes.Length > _uploads.MaxFileBytes)
+        {
+            throw new UploadTooLargeException(_uploads.MaxFileBytes);
+        }
+        return await markItDown.ConvertAsync(row.FileName, bytes, row.ContentType, cancellationToken);
+    }
+
     public async Task<bool> DeleteOrphanAsync(Guid id, CancellationToken cancellationToken)
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);

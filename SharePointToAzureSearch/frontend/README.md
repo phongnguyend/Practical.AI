@@ -17,6 +17,8 @@ against the search index, side by side.
 | **Feedback** | Every answer someone rated in the chat: the question, the answer, its sources, and a link that opens that conversation. Filter by rating or by text; tiles show how many were liked, disliked, and the liked share. The link jumps straight to that answer in the thread and highlights it, which matters once a conversation is long. |
 | **Search** | Full-text, vector, and hybrid over the same request body. **Compare all three** issues them together and reports each one's round trip, plus how much the three agree — distinct chunks returned, how many every strategy found, and how many only one strategy found. |
 
+The Indexed files and Attachment files lists both offer **View Markdown**. The API converts the source file with MarkItDown when opened; the resizable popup shows plain text and rendered Markdown tabs.
+
 Searches are kept in the URL (`/search?q=…&mode=compare&top=10`), so a result is a link and the
 back button steps through searches. So is the open conversation
 (`/chat?conversation=…&message=…`), which is how the Feedback page links to a particular answer.
