@@ -73,13 +73,7 @@ while (true)
 
     var userMessage = new Microsoft.Extensions.AI.ChatMessage(ChatRole.User, userInput);
 
-    var response = await agent.RunAsync(userMessage, session);
-
-    // Handle any pending approval requests (only script execution should require approval)
-    List<ToolApprovalRequestContent> approvalRequests = response.Messages
-        .SelectMany(m => m.Contents)
-        .OfType<ToolApprovalRequestContent>()
-        .ToList();
+    List<ToolApprovalRequestContent> approvalRequests = await StreamAgentResponseAsync(agent, userMessage, session);
 
     while (approvalRequests.Count > 0)
     {
@@ -92,14 +86,39 @@ while (true)
                 return new Microsoft.Extensions.AI.ChatMessage(ChatRole.User, [functionApprovalRequest.CreateResponse(approved)]);
             });
 
-        response = await agent.RunAsync(userInputResponses, session);
-        approvalRequests = response.Messages
-            .SelectMany(m => m.Contents)
-            .OfType<ToolApprovalRequestContent>()
-            .ToList();
+        approvalRequests = await StreamAgentResponseAsync(agent, userInputResponses, session);
+    }
+}
+
+static async Task<List<ToolApprovalRequestContent>> StreamAgentResponseAsync(
+    AIAgent agent,
+    object input,
+    AgentSession session)
+{
+    Console.Write("Agent: ");
+
+    var approvalRequests = new List<ToolApprovalRequestContent>();
+
+    var stream = input switch
+    {
+        Microsoft.Extensions.AI.ChatMessage message => agent.RunStreamingAsync(message, session),
+        List<Microsoft.Extensions.AI.ChatMessage> messages => agent.RunStreamingAsync(messages, session),
+        _ => throw new ArgumentOutOfRangeException(nameof(input)),
+    };
+
+    await foreach (var update in stream)
+    {
+        if (!string.IsNullOrEmpty(update.Text))
+        {
+            Console.Write(update.Text);
+        }
+
+        approvalRequests.AddRange(update.Contents.OfType<ToolApprovalRequestContent>());
     }
 
-    Console.WriteLine($"Agent: {response}");
+    Console.WriteLine();
+
+    return approvalRequests;
 }
 
 [Description("Get the current datetime")]
