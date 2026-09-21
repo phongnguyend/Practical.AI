@@ -1,8 +1,8 @@
 ---
 name: dns-lookup
-description: Perform DNS queries using PowerShell Resolve-DnsName to retrieve structured DNS records (A, AAAA, MX, TXT, NS, CNAME).
+description: Perform DNS queries using a PowerShell script to retrieve structured DNS records (A, AAAA, MX, TXT, NS, CNAME).
 license: MIT
-compatibility: Requires PowerShell 5.1+ or PowerShell Core with Resolve-DnsName available
+compatibility: Requires PowerShell 7+ and the dig command
 metadata:
   author: phongnguyen
   version: "2.0"
@@ -10,9 +10,9 @@ allowed-tools: powershell
 script_path: scripts/resolve-dns.ps1
 ---
 
-# DNS Lookup Skill (PowerShell - Resolve-DnsName)
+# DNS Lookup Skill (PowerShell)
 
-This skill performs DNS queries using the `Resolve-DnsName` cmdlet, returning structured and reliable DNS results.
+This skill executes `resolve-dns.ps1` with PowerShell. The script uses `dig` as its cross-platform DNS backend and returns structured JSON results.
 
 ## When to use
 

@@ -15,13 +15,9 @@ services:
   practical-microsoft-agent-framework:
     host: azure.ai.agent
     project: Practical.MicrosoftAgentFramework.FoundryHostedAgent
-    language: csharp
+    language: docker
     uses:
       - ai-project
-    codeConfiguration:
-      dependencyResolution: remote_build
-      entryPoint: Practical.MicrosoftAgentFramework.FoundryHostedAgent.dll
-      runtime: dotnet_10
     env:
       ASPNETCORE_URLS: http://+:8088
       AZURE_AI_MODEL_DEPLOYMENT_NAME: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}

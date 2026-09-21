@@ -19,35 +19,42 @@ if ($DnsServer -and $DnsServer -notmatch '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$') {
 }
 
 try {
-    $params = @{
-        Name        = $Domain
-        Type        = $RecordType
-        ErrorAction = "Stop"
-    }
-
+    $digArguments = @("+noall", "+answer", $Domain, $RecordType)
     if ($DnsServer) {
-        $params["Server"] = $DnsServer
+        $digArguments = @("@$DnsServer") + $digArguments
     }
 
-    $results = Resolve-DnsName @params
+    $answer = & dig @digArguments 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw ($answer -join [Environment]::NewLine)
+    }
 
-    $output = $results | ForEach-Object {
-        $record = [ordered]@{
-            Name = $_.Name
-            Type = $_.Type
-            TTL  = $_.TTL
+    $output = @($answer | ForEach-Object {
+        $line = $_.ToString().Trim()
+        if (-not $line) {
+            return
         }
 
-        if ($_.IPAddress) { $record["IPAddress"] = $_.IPAddress }
-        if ($_.NameHost)  { $record["NameHost"] = $_.NameHost }
-        if ($_.Exchange)  { $record["Exchange"] = $_.Exchange }
-        if ($_.Preference) { $record["Preference"] = $_.Preference }
-        if ($_.Strings)   { $record["Text"] = ($_.Strings -join " ") }
+        if ($line -notmatch '^(?<name>\S+)\s+(?<ttl>\d+)\s+(?<class>\S+)\s+(?<type>\S+)\s+(?<data>.*)$') {
+            throw "Unexpected DNS response: $line"
+        }
+
+        $record = [ordered]@{
+            Name  = $Matches.name.TrimEnd('.')
+            Type  = $Matches.type
+            TTL   = [int]$Matches.ttl
+            Value = $Matches.data
+        }
+
+        if ($Matches.type -eq "MX" -and $Matches.data -match '^(?<preference>\d+)\s+(?<exchange>\S+)$') {
+            $record["Preference"] = [int]$Matches.preference
+            $record["Exchange"] = $Matches.exchange.TrimEnd('.')
+        }
 
         [PSCustomObject]$record
-    }
+    })
 
-    $output | ConvertTo-Json -Depth 5 -Compress
+    ConvertTo-Json -InputObject $output -Depth 5 -Compress
 }
 catch {
     Write-Error "DNS query failed: $($_.Exception.Message)"
