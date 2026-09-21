@@ -1,0 +1,21 @@
+using Microsoft.Extensions.VectorData;
+
+namespace Practical.MicrosoftAgentFramework.FoundryHostedAgent;
+
+internal class Chunk
+{
+    [VectorStoreKey]
+    public Guid key { get; set; }
+
+    [VectorStoreData]
+    public required string content { get; set; }
+
+    [VectorStoreData]
+    public required string context { get; set; }
+
+    [VectorStoreData]
+    public required string documentid { get; set; }
+
+    [VectorStoreVector(dimensions: 1536, DistanceFunction = DistanceFunction.CosineDistance)]
+    public ReadOnlyMemory<float>? embedding { get; set; }
+}

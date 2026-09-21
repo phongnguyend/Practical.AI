@@ -2,4 +2,6 @@
   <Project Path="DataIngestion/DataIngestion.csproj" />
   <Project Path="Practical.MicrosoftAgentFramework.Shared/Practical.MicrosoftAgentFramework.Shared.csproj" />
   <Project Path="Practical.MicrosoftAgentFramework/Practical.MicrosoftAgentFramework.csproj" />
+  <Project Path="Practical.MicrosoftAgentFramework.FoundryHostedAgent/Practical.MicrosoftAgentFramework.FoundryHostedAgent.csproj" />
+  <Project Path="Practical.MicrosoftAgentFramework.FoundryHostedAgent.Client/Practical.MicrosoftAgentFramework.FoundryHostedAgent.Client.csproj" />
 </Solution>
