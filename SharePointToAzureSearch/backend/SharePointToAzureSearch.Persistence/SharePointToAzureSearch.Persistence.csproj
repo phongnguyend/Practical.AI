@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The SQL Server side of the application: the Entity Framework Core model, its migrations, and the
+    stores that implement the persistence abstractions the application layer declares.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SharePointToAzureSearch.Application\SharePointToAzureSearch.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Above the 6.1.x that Entity Framework Core 10 brings in on its own: that one resolves an Azure.Core
+      whose credential types collide with Azure.Identity's, which the Azure clients in the infrastructure
+      layer need.
+    -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" Version="10.0.12" />
+  </ItemGroup>
+
+</Project>

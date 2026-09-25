@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.5.4" />
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsAspireHost>true</IsAspireHost>
+    <AspireUseCliBundle>true</AspireUseCliBundle>
+    <UserSecretsId>SharePointToAzureSearch.aa86af98-b197-450b-8db6-45521bab965d</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" Version="13.5.4" />
+    <PackageReference Include="Aspire.Hosting.SqlServer" Version="13.5.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SharePointToAzureSearch.Api\SharePointToAzureSearch.Api.csproj" />
+    <ProjectReference Include="..\SharePointToAzureSearch.Background\SharePointToAzureSearch.Background.csproj" />
+    <ProjectReference Include="..\SharePointToAzureSearch.AgentHost\SharePointToAzureSearch.AgentHost.csproj" />
+  </ItemGroup>
+
+</Project>

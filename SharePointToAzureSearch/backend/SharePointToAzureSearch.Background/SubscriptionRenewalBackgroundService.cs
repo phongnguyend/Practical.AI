@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Options;
-using SharePointToAzureSearch.Core;
+using SharePointToAzureSearch.Application;
+using SharePointToAzureSearch.Domain;
+using SharePointToAzureSearch.Infrastructure;
 
 namespace SharePointToAzureSearch.Background;
 

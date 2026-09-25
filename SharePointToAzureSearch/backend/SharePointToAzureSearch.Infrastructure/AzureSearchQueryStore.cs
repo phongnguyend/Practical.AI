@@ -1,0 +1,103 @@
+using Azure.Search.Documents;
+using Azure.Search.Documents.Models;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
+using AzureSearchOptions = Azure.Search.Documents.SearchOptions;
+using SharePointToAzureSearch.Application;
+using SharePointToAzureSearch.Domain;
+
+namespace SharePointToAzureSearch.Infrastructure;
+
+public sealed class AzureSearchQueryStore(
+    SearchClient searchClient,
+    IEmbeddingGenerator<string, Embedding<float>> embeddings,
+    SharePointClient sharePointClient,
+    ILogger<AzureSearchQueryStore> logger) : ISearchQueryStore
+{
+    private static readonly string[] ProjectedFields =
+    [
+        "id", "driveId", "itemId", "name", "path", "webUrl",
+        "mimeType", "size", "lastModifiedUtc", "chunkNumber", "content"
+    ];
+
+    public async Task<SearchQueryResults> SearchAsync(SearchQueryMode mode, SearchQueryRequest request, CancellationToken cancellationToken)
+    {
+        var options = new AzureSearchOptions
+        {
+            Filter = await BuildPermissionFilterAsync(request.UserId, cancellationToken),
+            Size = request.Top,
+            Skip = request.Skip,
+            IncludeTotalCount = true
+        };
+        foreach (var field in ProjectedFields)
+        {
+            options.Select.Add(field);
+        }
+
+        if (mode is SearchQueryMode.Vector or SearchQueryMode.Hybrid)
+        {
+            var vector = await embeddings.GenerateVectorAsync(request.Query, cancellationToken: cancellationToken);
+            options.VectorSearch = new VectorSearchOptions
+            {
+                Queries =
+                {
+                    new VectorizedQuery(vector)
+                    {
+                        // Retrieve enough neighbours to still fill the requested page after skipping.
+                        KNearestNeighborsCount = request.Top + request.Skip,
+                        Fields = { "contentVector" }
+                    }
+                }
+            };
+        }
+
+        // Pure vector search must not send query text, otherwise the request becomes a hybrid one.
+        var searchText = mode is SearchQueryMode.Vector ? null : request.Query;
+        var response = await searchClient.SearchAsync<SearchChunkDocument>(searchText, options, cancellationToken);
+
+        var items = new List<SearchQueryHit>();
+        await foreach (var result in response.Value.GetResultsAsync())
+        {
+            var document = result.Document;
+            items.Add(new SearchQueryHit(
+                document.Id,
+                document.DriveId,
+                document.ItemId,
+                document.Name,
+                document.Path,
+                document.WebUrl,
+                document.MimeType,
+                document.Size,
+                document.LastModifiedUtc,
+                document.ChunkNumber,
+                document.Content,
+                result.Score));
+        }
+
+        logger.LogInformation("{Mode} search returned {Count} chunks for user {UserId}.", mode, items.Count, request.UserId ?? "(unfiltered)");
+        return new SearchQueryResults(response.Value.TotalCount, items);
+    }
+
+    /// <summary>
+    /// Restricts results to chunks the user can view. Without a user ID no restriction is applied, so the
+    /// caller is responsible for only omitting it on trusted, non-user-facing calls.
+    /// </summary>
+    private async Task<string?> BuildPermissionFilterAsync(string? userId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return null;
+        }
+
+        var principals = await sharePointClient.GetUserPrincipalsAsync(userId, cancellationToken);
+        if (principals.Count == 0)
+        {
+            return "hasAnonymousAccess eq true";
+        }
+
+        var values = string.Join(',', principals.Select(Escape));
+        return $"hasAnonymousAccess eq true or allowedPrincipals/any(p: search.in(p, '{values}', ','))";
+    }
+
+    private static string Escape(string value) => value.Replace("'", "''", StringComparison.Ordinal);
+}

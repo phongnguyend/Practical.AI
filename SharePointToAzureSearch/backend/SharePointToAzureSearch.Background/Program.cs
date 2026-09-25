@@ -1,5 +1,5 @@
 using SharePointToAzureSearch.Background;
-using SharePointToAzureSearch.Core;
+using SharePointToAzureSearch.Infrastructure;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddChangeProcessorServices(builder.Configuration);

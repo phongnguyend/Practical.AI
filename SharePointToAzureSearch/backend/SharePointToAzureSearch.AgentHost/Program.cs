@@ -1,5 +1,5 @@
 using Azure.AI.AgentServer.Invocations;
-using SharePointToAzureSearch.Core;
+using SharePointToAzureSearch.Infrastructure;
 using SharePointToAzureSearch.AgentHost;
 
 InvocationsServer.Run<ChatAgentInvocation>(args: args, configure: builder =>

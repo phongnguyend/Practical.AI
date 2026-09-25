@@ -2,8 +2,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using NSubstitute;
-using SharePointToAzureSearch.Core;
-using SharePointToAzureSearch.Core.Data;
+using SharePointToAzureSearch.Application;
+using SharePointToAzureSearch.Domain;
+using SharePointToAzureSearch.Infrastructure;
+using SharePointToAzureSearch.Persistence;
 using Xunit;
 
 namespace SharePointToAzureSearch.Tests;

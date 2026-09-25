@@ -1,0 +1,557 @@
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
+using Microsoft.Graph;
+using Microsoft.Graph.Drives.Item.Items.Item.CreateUploadSession;
+using Microsoft.Graph.Drives.Item.Items.Item.Delta;
+using Microsoft.Graph.Models;
+using Microsoft.Kiota.Abstractions;
+using System.Net;
+using SdkSubscription = Microsoft.Graph.Models.Subscription;
+using SharePointToAzureSearch.Application;
+using SharePointToAzureSearch.Domain;
+
+namespace SharePointToAzureSearch.Infrastructure;
+
+public sealed class SharePointClient(
+    GraphServiceClient graph,
+    IMemoryCache memoryCache,
+    IOptions<SharePointOptions> options)
+{
+    /// <summary>Largest file Microsoft Graph accepts in a single content request.</summary>
+    private const int SimpleUploadLimitBytes = 4 * 1024 * 1024;
+
+    /// <summary>How much of a larger file each upload-session slice carries; Graph requires a multiple of 320 KiB.</summary>
+    private const int UploadSliceBytes = 5 * 320 * 1024;
+
+    private readonly SharePointOptions _options = options.Value;
+
+    private async Task<Site> GetSiteAsync(CancellationToken cancellationToken = default)
+    {
+        var cacheKey = $"SharePointSite_{_options.SiteHostname}_{_options.SitePath}";
+
+        var cacheOptions = new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10),
+            SlidingExpiration = TimeSpan.FromMinutes(5)
+        };
+
+        return await memoryCache.GetOrSetAsync(cacheKey, async () =>
+        {
+            var site = await graph.Sites[$"{_options.SiteHostname}:{_options.SitePath}"]
+                .GetAsync(cancellationToken: cancellationToken);
+            return site ?? throw new InvalidDataException("Microsoft Graph returned an empty site response.");
+        }, cacheOptions);
+    }
+
+    private async Task<Drive> GetDocumentLibraryAsync(CancellationToken cancellationToken = default)
+    {
+        var cacheKey = $"SharePointDrive_{_options.SiteHostname}_{_options.SitePath}_{_options.DocumentLibraryName}";
+
+        var cacheOptions = new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10),
+            SlidingExpiration = TimeSpan.FromMinutes(5)
+        };
+
+        return await memoryCache.GetOrSetAsync(cacheKey, async () =>
+        {
+            var site = await GetSiteAsync(cancellationToken);
+
+            var drives = await graph.Sites[site.Id].Drives
+                .GetAsync(cancellationToken: cancellationToken);
+
+            var drive = (drives?.Value ?? []).FirstOrDefault(d =>
+                string.Equals(d.Name, _options.DocumentLibraryName, StringComparison.OrdinalIgnoreCase));
+
+            if (drive == null)
+            {
+                throw new InvalidOperationException($"Document library '{_options.DocumentLibraryName}' not found");
+            }
+
+            return drive;
+        }, cacheOptions);
+    }
+
+    public async Task<string> GetDriveIdAsync(CancellationToken cancellationToken = default)
+    {
+        var drive = await GetDocumentLibraryAsync(cancellationToken);
+        return drive.Id ?? throw new InvalidDataException("Microsoft Graph returned a document library without an ID.");
+    }
+
+    public async Task<DriveItemChange> GetItemAsync(string itemId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var driveId = await GetDriveIdAsync(cancellationToken);
+            var item = await graph.Drives[driveId].Items[itemId]
+                .GetAsync(cancellationToken: cancellationToken)
+                ?? throw new InvalidDataException("Microsoft Graph returned an empty drive item response.");
+            return ToDriveItemChange(item);
+        }
+        catch (ApiException ex)
+        {
+            throw ToHttpRequestException(ex);
+        }
+    }
+
+    /// <summary>
+    /// Resolves the principal tokens that grant a user access to indexed content: the user's own object ID,
+    /// their mail addresses, and every group they are a transitive member of. The tokens use the same shape
+    /// as <see cref="SearchChunkDocument.AllowedPrincipals"/>, so they can be compared directly in a filter.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> GetUserPrincipalsAsync(string userId, CancellationToken cancellationToken = default)
+    {
+        var cacheKey = $"SharePointUserPrincipals_{userId}";
+
+        var cacheOptions = new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10),
+            SlidingExpiration = TimeSpan.FromMinutes(5)
+        };
+
+        return await memoryCache.GetOrSetAsync<IReadOnlyList<string>>(cacheKey, async () =>
+        {
+            try
+            {
+                var principals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                var user = await graph.Users[userId].GetAsync(request =>
+                    request.QueryParameters.Select = ["id", "mail", "userPrincipalName"],
+                    cancellationToken)
+                    ?? throw new InvalidDataException("Microsoft Graph returned an empty user response.");
+
+                if (user.Id is { Length: > 0 } id)
+                {
+                    principals.Add($"user:{id}");
+                }
+
+                if (user.Mail is { Length: > 0 } mail)
+                {
+                    principals.Add($"email:{mail.ToLowerInvariant()}");
+                }
+
+                if (user.UserPrincipalName is { Length: > 0 } upn)
+                {
+                    principals.Add($"email:{upn.ToLowerInvariant()}");
+                }
+
+                var response = await graph.Users[userId].TransitiveMemberOf
+                    .GetAsync(cancellationToken: cancellationToken);
+                while (response is not null)
+                {
+                    foreach (var directoryObject in response.Value ?? [])
+                    {
+                        if (directoryObject is Group { Id: { Length: > 0 } groupId })
+                        {
+                            principals.Add($"group:{groupId}");
+                        }
+                    }
+
+                    response = response.OdataNextLink is { Length: > 0 } nextLink
+                        ? await graph.Users[userId].TransitiveMemberOf.WithUrl(nextLink)
+                            .GetAsync(cancellationToken: cancellationToken)
+                        : null;
+                }
+
+                return principals.Order().ToArray();
+            }
+            catch (ApiException ex)
+            {
+                throw ToHttpRequestException(ex);
+            }
+        }, cacheOptions);
+    }
+
+    public async Task<DeltaPage> GetDeltaPageAsync(string? url, CancellationToken cancellationToken)
+    {
+        try
+        {
+            url ??= $"https://graph.microsoft.com/v1.0/drives/{Uri.EscapeDataString(await GetDriveIdAsync(cancellationToken))}/root/delta";
+
+            var response = await new DeltaRequestBuilder(url, graph.RequestAdapter)
+                .GetAsDeltaGetResponseAsync(cancellationToken: cancellationToken)
+                ?? throw new InvalidDataException("Microsoft Graph returned an empty delta response.");
+
+            var items = (response.Value ?? []).Select(ToDriveItemChange).ToArray();
+
+            return new(items, response.OdataNextLink, response.OdataDeltaLink);
+        }
+        catch (ApiException ex) when (ex.ResponseStatusCode == (int)HttpStatusCode.Gone)
+        {
+            throw new GraphDeltaTokenExpiredException();
+        }
+        catch (ApiException ex)
+        {
+            throw ToHttpRequestException(ex);
+        }
+    }
+
+    private static DriveItemChange ToDriveItemChange(DriveItem item) => new(
+        item.Id ?? throw new InvalidDataException("Microsoft Graph returned a drive item without an ID."),
+        item.Name ?? "",
+        item.WebUrl,
+        item.File?.MimeType,
+        item.Size,
+        item.LastModifiedDateTime,
+        item.ETag,
+        item.CTag,
+        item.File is not null,
+        item.Deleted is not null,
+        item.ParentReference?.Path);
+
+    public async Task<byte[]> DownloadContentAsync(string itemId, int maxBytes, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var driveId = await GetDriveIdAsync(cancellationToken);
+            await using var input = await graph.Drives[driveId].Items[itemId].Content
+                .GetAsync(cancellationToken: cancellationToken)
+                ?? throw new InvalidDataException("Microsoft Graph returned an empty content stream.");
+            using var output = new MemoryStream();
+            var buffer = new byte[81920];
+            int read;
+            while ((read = await input.ReadAsync(buffer, cancellationToken)) > 0)
+            {
+                if (output.Length + read > maxBytes)
+                {
+                    throw new FileTooLargeException(output.Length + read, maxBytes);
+                }
+
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            }
+            return output.ToArray();
+        }
+        catch (ApiException ex)
+        {
+            throw ToHttpRequestException(ex);
+        }
+    }
+
+    /// <summary>
+    /// Streams an item's content straight to <paramref name="destinationPath"/> and returns how many bytes
+    /// were written, so a file that is only wanted on disk never has to be held in memory the way
+    /// <see cref="DownloadContentAsync"/> holds it. The caller owns the path and its directory; an existing
+    /// file there is overwritten, and a download that fails, exceeds <paramref name="maxBytes"/>, or is
+    /// cancelled deletes what it had written rather than leaving a partial file behind.
+    /// </summary>
+    public async Task<long> DownloadToFileAsync(string itemId, string destinationPath, int maxBytes, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var driveId = await GetDriveIdAsync(cancellationToken);
+            await using var input = await graph.Drives[driveId].Items[itemId].Content
+                .GetAsync(cancellationToken: cancellationToken)
+                ?? throw new InvalidDataException("Microsoft Graph returned an empty content stream.");
+
+            var written = 0L;
+            await using (var output = new FileStream(
+                destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 81920, useAsync: true))
+            {
+                var buffer = new byte[81920];
+                int read;
+                while ((read = await input.ReadAsync(buffer, cancellationToken)) > 0)
+                {
+                    // Checked before the write, so an oversized file costs one buffer rather than the
+                    // whole download — Graph does not always report a length up front.
+                    if (written + read > maxBytes)
+                    {
+                        throw new FileTooLargeException(written + read, maxBytes);
+                    }
+
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                    written += read;
+                }
+            }
+
+            return written;
+        }
+        catch (ApiException ex)
+        {
+            TryDeleteFile(destinationPath);
+            throw ToHttpRequestException(ex);
+        }
+        catch
+        {
+            TryDeleteFile(destinationPath);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Replaces the content of an existing drive item with a local file, streamed from disk. SharePoint
+    /// keeps the file it had as a previous version, so this adds a version rather than overwriting
+    /// history, and it needs write access to the drive — the application permissions used for indexing
+    /// alone are not enough.
+    /// <para>
+    /// Files up to <see cref="SimpleUploadLimitBytes"/> go in one request; a larger one goes through an
+    /// upload session, which Microsoft Graph requires past about 4 MB and which sends the file in slices.
+    /// </para>
+    /// </summary>
+    public async Task<UploadedFileVersion> UploadFileAsync(string itemId, string sourcePath, int maxBytes, CancellationToken cancellationToken)
+    {
+        var source = new FileInfo(sourcePath);
+        if (!source.Exists)
+        {
+            throw new FileNotFoundException("There is no local file to upload.", sourcePath);
+        }
+
+        if (source.Length > maxBytes)
+        {
+            throw new FileTooLargeException(source.Length, maxBytes);
+        }
+
+        try
+        {
+            var driveId = await GetDriveIdAsync(cancellationToken);
+            await using var content = new FileStream(
+                sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 81920, useAsync: true);
+
+            DriveItem? item;
+            if (content.Length <= SimpleUploadLimitBytes)
+            {
+                item = await graph.Drives[driveId].Items[itemId].Content
+                    .PutAsync(content, cancellationToken: cancellationToken);
+            }
+            else
+            {
+                var session = await graph.Drives[driveId].Items[itemId].CreateUploadSession
+                    .PostAsync(new CreateUploadSessionPostRequestBody
+                    {
+                        Item = new DriveItemUploadableProperties
+                        {
+                            // The item already exists and its content is being replaced, so a name
+                            // collision is the expected case rather than a reason to fail.
+                            AdditionalData = new Dictionary<string, object>
+                            {
+                                ["@microsoft.graph.conflictBehavior"] = "replace"
+                            }
+                        }
+                    }, cancellationToken: cancellationToken)
+                    ?? throw new InvalidDataException("Microsoft Graph returned an empty upload session.");
+
+                var upload = new LargeFileUploadTask<DriveItem>(session, content, UploadSliceBytes, graph.RequestAdapter);
+                var result = await upload.UploadAsync(cancellationToken: cancellationToken);
+                if (!result.UploadSucceeded)
+                {
+                    throw new InvalidDataException("The upload session ended without Microsoft Graph accepting the whole file.");
+                }
+
+                item = result.ItemResponse;
+            }
+
+            return new UploadedFileVersion(
+                itemId,
+                item?.Name ?? source.Name,
+                item?.WebUrl,
+                item?.Size ?? source.Length,
+                item?.LastModifiedDateTime,
+                item?.ETag,
+                item?.CTag);
+        }
+        catch (ApiException ex)
+        {
+            throw ToHttpRequestException(ex);
+        }
+    }
+
+    public async Task<PermissionSnapshot> GetPermissionsAsync(string itemId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var principals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var roles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var anonymous = false;
+            var driveId = await GetDriveIdAsync(cancellationToken);
+            var response = await graph.Drives[driveId].Items[itemId].Permissions
+                .GetAsync(cancellationToken: cancellationToken);
+
+            while (response is not null)
+            {
+                foreach (var permission in response.Value ?? [])
+                {
+                    foreach (var role in permission.Roles ?? [])
+                    {
+                        roles.Add(role);
+                    }
+
+                    if (string.Equals(permission.Link?.Scope, "anonymous", StringComparison.OrdinalIgnoreCase))
+                    {
+                        anonymous = true;
+                        principals.Add("anonymous");
+                    }
+
+                    AddIdentitySet(permission.GrantedToV2, principals);
+                    foreach (var identity in permission.GrantedToIdentitiesV2 ?? [])
+                    {
+                        AddIdentitySet(identity, principals);
+                    }
+                }
+
+                response = response.OdataNextLink is { Length: > 0 } nextLink
+                    ? await graph.Drives[driveId].Items[itemId].Permissions.WithUrl(nextLink)
+                        .GetAsync(cancellationToken: cancellationToken)
+                    : null;
+            }
+            return new(principals.Order().ToArray(), roles.Order().ToArray(), anonymous);
+        }
+        catch (ApiException ex)
+        {
+            throw ToHttpRequestException(ex);
+        }
+    }
+
+    public async Task<IReadOnlyList<GraphSubscription>> ListSubscriptionsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var subscriptions = new List<GraphSubscription>();
+            var response = await graph.Subscriptions.GetAsync(cancellationToken: cancellationToken);
+            while (response is not null)
+            {
+                subscriptions.AddRange((response.Value ?? []).Select(ToGraphSubscription));
+                response = response.OdataNextLink is { Length: > 0 } nextLink
+                    ? await graph.Subscriptions.WithUrl(nextLink).GetAsync(cancellationToken: cancellationToken)
+                    : null;
+            }
+            return subscriptions;
+        }
+        catch (ApiException ex)
+        {
+            throw ToHttpRequestException(ex);
+        }
+    }
+
+    /// <summary>
+    /// Creates a subscription over the configured drive. <paramref name="notificationUrl"/> overrides
+    /// <c>SharePoint:NotificationUrl</c> for this one subscription, which is what lets an operator point
+    /// a subscription at a tunnel or a replacement host without redeploying; omit it for the configured
+    /// value. Microsoft Graph calls the URL to validate it before the subscription is created, so it has
+    /// to be reachable from the internet at the time of the call. <paramref name="clientState"/> carries
+    /// the authenticated name used to recognize the subscription later.
+    /// </summary>
+    public async Task<GraphSubscription> CreateSubscriptionAsync(
+        DateTimeOffset expiration,
+        string? notificationUrl,
+        string clientState,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var driveId = await GetDriveIdAsync(cancellationToken);
+            var result = await graph.Subscriptions.PostAsync(new SdkSubscription
+            {
+                ChangeType = "updated",
+                NotificationUrl = string.IsNullOrWhiteSpace(notificationUrl)
+                    ? _options.NotificationUrl
+                    : notificationUrl,
+                Resource = $"drives/{driveId}/root",
+                ExpirationDateTime = expiration,
+                ClientState = clientState,
+                LatestSupportedTlsVersion = "v1_2"
+            }, cancellationToken: cancellationToken)
+                ?? throw new InvalidDataException("Microsoft Graph returned an empty subscription response.");
+            return ToGraphSubscription(result);
+        }
+        catch (ApiException ex)
+        {
+            throw ToHttpRequestException(ex);
+        }
+    }
+
+    public async Task RenewSubscriptionAsync(string id, DateTimeOffset expiration, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await graph.Subscriptions[id].PatchAsync(new SdkSubscription
+            {
+                ExpirationDateTime = expiration
+            }, cancellationToken: cancellationToken);
+        }
+        catch (ApiException ex)
+        {
+            throw ToHttpRequestException(ex);
+        }
+    }
+
+    /// <summary>
+    /// Removes a subscription. Microsoft Graph stops delivering notifications for it immediately, so the
+    /// drive is then only reconciled by the scheduled synchronization.
+    /// </summary>
+    public async Task DeleteSubscriptionAsync(string id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await graph.Subscriptions[id].DeleteAsync(cancellationToken: cancellationToken);
+        }
+        catch (ApiException ex)
+        {
+            throw ToHttpRequestException(ex);
+        }
+    }
+
+    private static GraphSubscription ToGraphSubscription(SdkSubscription item) => new(
+        item.Id ?? throw new InvalidDataException("Microsoft Graph returned a subscription without an ID."),
+        item.Resource ?? "",
+        item.NotificationUrl ?? "",
+        item.ExpirationDateTime ?? DateTimeOffset.MinValue,
+        item.ClientState);
+
+    private static void AddIdentitySet(SharePointIdentitySet? identitySet, HashSet<string> principals)
+    {
+        if (identitySet is null)
+        {
+            return;
+        }
+
+        AddIdentity("user", identitySet.User, principals);
+        AddIdentity("group", identitySet.Group, principals);
+        AddIdentity("siteGroup", identitySet.SiteGroup, principals);
+        AddIdentity("siteGroup", identitySet.SharePointGroup, principals);
+        AddIdentity("siteUser", identitySet.SiteUser, principals);
+        AddIdentity("application", identitySet.Application, principals);
+    }
+
+    private static void AddIdentity(string kind, Identity? identity, HashSet<string> principals)
+    {
+        if (identity?.Id is { Length: > 0 } id)
+        {
+            principals.Add($"{kind}:{id}");
+        }
+
+        if (identity is SharePointIdentity { LoginName.Length: > 0 } sharePointIdentity && sharePointIdentity.LoginName.Contains('@'))
+        {
+            principals.Add($"email:{sharePointIdentity.LoginName.ToLowerInvariant()}");
+        }
+
+        if (identity?.AdditionalData.TryGetValue("email", out var email) == true && email?.ToString() is { Length: > 0 } value)
+        {
+            principals.Add($"email:{value.ToLowerInvariant()}");
+        }
+    }
+
+    /// <summary>
+    /// Removes a partially written download. It runs while an exception is in flight, so a failure to
+    /// delete must not replace the exception that caused it.
+    /// </summary>
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static HttpRequestException ToHttpRequestException(ApiException exception)
+    {
+        HttpStatusCode? statusCode = exception.ResponseStatusCode is >= 100 and <= 599
+            ? (HttpStatusCode)exception.ResponseStatusCode
+            : null;
+        return new HttpRequestException(exception.Message, exception, statusCode);
+    }
+}

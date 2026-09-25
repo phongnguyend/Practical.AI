@@ -7,7 +7,19 @@ This .NET 10 solution keeps a permission-aware Azure AI Search vector index sync
 - `SharePointToAzureSearch.Api` exposes `POST /api/sharepoint/webhook`, completes Microsoft Graph's validation handshake, validates `clientState`, and publishes change signals to an Azure Service Bus topic. It also serves search, state, and checkpoint management endpoints for the front end.
 - `frontend` is a React and Vite app for viewing the worker's SQL Server state and running the three retrieval strategies against the index. See [frontend/README.md](frontend/README.md).
 - `SharePointToAzureSearch.Background` consumes a topic subscription. It follows the Microsoft Graph drive delta feed and, for each file the feed returns, compares it against the metadata recorded for the last indexing run in SQL Server: an unchanged file is left alone, a renamed or re-shared file has its metadata refreshed in place, and only a file whose content actually changed is downloaded, extracted, chunked, embedded, and replaced. Deleted files have all chunks removed. Two more hosted services run alongside it: one creates the Graph subscription and renews it before expiration (`SharePoint:SubscriptionRenewalEnabled` to turn it off), and one runs the same delta synchronization every `Processor:ScheduledSyncMinutes` (5 by default, `ScheduledSyncEnabled` to turn it off) so missed notifications still get picked up. Either trigger can run without the other: disable the subscription to poll only, or disable the schedule to react only to notifications. All three triggers — notification, schedule, and startup sync — are serialized, so only one delta pass runs at a time.
-- `SharePointToAzureSearch.Core` uses the Microsoft Graph .NET SDK for subscriptions, delta tracking, downloads, and permissions, and contains the Service Bus, SQL Server state, extraction, embedding, and search-index implementations. Embeddings go through `Microsoft.Extensions.AI`'s `IEmbeddingGenerator<string, Embedding<float>>`, backed by `AzureOpenAIClient` from the Azure OpenAI SDK, so the embedding model can be swapped without touching the indexing or query code.
+- `SharePointToAzureSearch.AgentHost` runs the same chat agent as a Foundry Hosted Agent, behind an `/invocations` endpoint the API streams from. See [agent hosting options](backend/SharePointToAzureSearch.AgentHost/README.md).
+- `SharePointToAzureSearch.AspireAppHost` runs the API, the worker, and the agent host together against a containerized SQL Server, with the .NET Aspire dashboard over the three of them.
+
+The work behind those hosts is split into four layers, each its own project:
+
+| Project | Holds | References |
+| --- | --- | --- |
+| `SharePointToAzureSearch.Domain` | The records, enums, and exceptions the rest is written in terms of — drive items, chunks, conversations, agents, subscriptions — plus pure helpers such as `TextChunker` and `SearchChunkKey`. No package references. | — |
+| `SharePointToAzureSearch.Application` | The contracts the outer layers implement (`ISharePointChangeProcessor`, `ISearchIndexStore`, `IChatStore`, `IChatAgentExecutor`, …), the settings classes they are configured from, and orchestration that needs nothing more than those contracts. No package references. | Domain |
+| `SharePointToAzureSearch.Persistence` | The Entity Framework Core model, its migrations, and the SQL Server stores behind the persistence contracts. `AddPersistence` registers the pooled context. | Application |
+| `SharePointToAzureSearch.Infrastructure` | Everything outside the process: the Microsoft Graph .NET SDK for subscriptions, delta tracking, downloads, and permissions; Service Bus, Azure AI Search, Azure OpenAI and the chat agent, Blob Storage, Document Intelligence, MarkItDown, and the officecli MCP server. Also the composition root the hosts call into. | Application, Persistence |
+
+Embeddings go through `Microsoft.Extensions.AI`'s `IEmbeddingGenerator<string, Embedding<float>>`, backed by `AzureOpenAIClient` from the Azure OpenAI SDK, so the embedding model can be swapped without touching the indexing or query code.
 
 The webhook is intentionally only a signal. Microsoft Graph drive notifications do not contain a complete, durable list of item-level changes. A delta link is checkpointed in SQL Server only after every returned page is indexed successfully, making retries idempotent and allowing expired delta tokens to trigger a full reconciliation. Those reconciliations are why file metadata is tracked in the same database: the delta feed then returns every file in the library, and without a record of what was already indexed each one would be extracted and embedded again. See [Worker state in SQL Server](#worker-state-in-sql-server).
 
@@ -191,6 +203,14 @@ dotnet run --project backend/SharePointToAzureSearch.Api
 dotnet run --project backend/SharePointToAzureSearch.Background
 ```
 
+Or start the API, the worker, and the agent host together behind the .NET Aspire dashboard. The AppHost also runs SQL Server in a container and hands each process its connection string as `SqlServer__ConnectionString`, so no local database has to be provisioned first; every other setting still comes from each project's `appsettings.json` and user secrets. It needs a container runtime.
+
+```powershell
+dotnet run --project backend/SharePointToAzureSearch.AspireAppHost
+```
+
+The SQL Server container is declared with a persistent lifetime, so the indexed library survives between debugging sessions rather than being rebuilt on every run.
+
 `Processor:SyncOnStartup` defaults to `true`, so existing documents are indexed immediately rather than waiting for the next webhook or scheduled tick. Both the change signal listener and the scheduled synchronization honour it, so the startup pass happens whichever trigger is enabled. When both are enabled the second request is a no-op: passes are serialized, and the first one has already advanced the delta checkpoint. Service Bus notifications after that advance the checkpoint further.
 
 `Processor:ChangeSignalListenerEnabled` defaults to `true`. Set it to `false` to stop the worker from consuming change signals from the Service Bus subscription, leaving `Processor:ScheduledSyncEnabled` as the only trigger for delta synchronization.
@@ -232,7 +252,7 @@ Azure AI Search rejects breaking field changes on an existing index, including a
 
 ## Worker state in SQL Server
 
-All of the worker's own state lives in one SQL Server database, configured by the `SqlServer` section, and is reached through Entity Framework Core. `SharePointIndexDbContext` in `SharePointToAzureSearch.Core/Data` defines every table — the two below plus the chat assistant's — and the migrations in `SharePointToAzureSearch.Core/Migrations` are generated from it, so the model is the source of truth for the schema and table names are fixed rather than configured. See [Schema and migrations](#schema-and-migrations).
+All of the worker's own state lives in one SQL Server database, configured by the `SqlServer` section, and is reached through Entity Framework Core. `SharePointIndexDbContext` in `SharePointToAzureSearch.Persistence` defines every table — the two below plus the chat assistant's — and the migrations in `SharePointToAzureSearch.Persistence/Migrations` are generated from it, so the model is the source of truth for the schema and table names are fixed rather than configured. See [Schema and migrations](#schema-and-migrations).
 
 ### Delta checkpoint
 
@@ -314,13 +334,13 @@ The schema is defined by `SharePointIndexDbContext` and applied by Entity Framew
 Turn `AutoMigrate` off where the login has no DDL rights, and apply the schema from the pipeline instead:
 
 ```bash
-dotnet ef migrations script --idempotent   --project backend/SharePointToAzureSearch.Core --output schema.sql
+dotnet ef migrations script --idempotent   --project backend/SharePointToAzureSearch.Persistence --output schema.sql
 ```
 
 Changing a table, a column, or an index means changing the model and generating a migration for it, rather than editing the database by hand:
 
 ```bash
-cd backend/SharePointToAzureSearch.Core
+cd backend/SharePointToAzureSearch.Persistence
 dotnet ef migrations add <Name>
 dotnet ef database update      # or let AutoMigrate apply it on the next start
 ```

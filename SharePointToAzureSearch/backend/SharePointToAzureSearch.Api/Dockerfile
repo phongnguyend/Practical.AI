@@ -1,7 +1,10 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /source
 
-COPY ["backend/SharePointToAzureSearch.Core/SharePointToAzureSearch.Core.csproj", "backend/SharePointToAzureSearch.Core/"]
+COPY ["backend/SharePointToAzureSearch.Domain/SharePointToAzureSearch.Domain.csproj", "backend/SharePointToAzureSearch.Domain/"]
+COPY ["backend/SharePointToAzureSearch.Application/SharePointToAzureSearch.Application.csproj", "backend/SharePointToAzureSearch.Application/"]
+COPY ["backend/SharePointToAzureSearch.Persistence/SharePointToAzureSearch.Persistence.csproj", "backend/SharePointToAzureSearch.Persistence/"]
+COPY ["backend/SharePointToAzureSearch.Infrastructure/SharePointToAzureSearch.Infrastructure.csproj", "backend/SharePointToAzureSearch.Infrastructure/"]
 COPY ["backend/SharePointToAzureSearch.Api/SharePointToAzureSearch.Api.csproj", "backend/SharePointToAzureSearch.Api/"]
 RUN dotnet restore "backend/SharePointToAzureSearch.Api/SharePointToAzureSearch.Api.csproj"
 

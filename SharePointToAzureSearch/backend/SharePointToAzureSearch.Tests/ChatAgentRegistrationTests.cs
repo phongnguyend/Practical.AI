@@ -1,7 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SharePointToAzureSearch.Core;
+using SharePointToAzureSearch.Application;
+using SharePointToAzureSearch.Infrastructure;
 using Xunit;
 
 namespace SharePointToAzureSearch.Tests;

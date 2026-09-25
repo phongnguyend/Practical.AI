@@ -1,0 +1,366 @@
+using Azure;
+using Azure.AI.OpenAI;
+using Azure.Core;
+using Azure.Identity;
+using Azure.Messaging.ServiceBus;
+using Azure.Search.Documents;
+using Azure.Search.Documents.Indexes;
+using Azure.Storage.Blobs;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Microsoft.Graph;
+using SharePointToAzureSearch.Persistence;
+using SharePointToAzureSearch.Application;
+using SharePointToAzureSearch.Domain;
+
+using SearchOptions = SharePointToAzureSearch.Application.SearchOptions;
+
+namespace SharePointToAzureSearch.Infrastructure;
+
+public static class DependencyInjection
+{
+    public static IServiceCollection AddWebhookServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        AddGraphClient(services);
+        AddSharePointOptions(services, configuration);
+        AddServiceBusOptions(services, configuration, required: true);
+        services.AddMemoryCache();
+        services.AddSingleton<SharePointClient>();
+        services.AddSingleton<SubscriptionManager>();
+        AddServiceBusClient(services);
+        services.AddSingleton<IChangeSignalPublisher, ServiceBusChangeSignalPublisher>();
+        return services;
+    }
+
+    /// <summary>
+    /// Adds the full-text, vector, and hybrid query pipeline. Requires <see cref="AddWebhookServices"/> (or
+    /// another registration that supplies <see cref="SharePointClient"/>) for the permission filter.
+    /// </summary>
+    public static IServiceCollection AddSearchQueryServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        AddSearchOptions(services, configuration);
+        AddOpenAiOptions(services, configuration);
+        AddEmbeddingGenerator(services);
+        AddSearchClient(services);
+        services.AddSingleton<ISearchQueryStore, AzureSearchQueryStore>();
+        return services;
+    }
+
+    /// <summary>
+    /// Adds the chat assistant: conversation storage in SQL Server, and an agent on the Azure OpenAI
+    /// chat deployment that can search the index and download files from it. Requires
+    /// <see cref="AddSearchQueryServices"/> for the retrieval tool and <see cref="AddWebhookServices"/>
+    /// for the permission filter behind it and for the Microsoft Graph client the download tool uses.
+    /// </summary>
+    public static IServiceCollection AddChatServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        AddChatStorage(services, configuration);
+        services.AddOptions<ChatAgentHostingOptions>().Bind(configuration.GetSection(ChatAgentHostingOptions.SectionName))
+            .ValidateDataAnnotations().ValidateOnStart();
+        var mode = configuration.GetValue<ChatAgentExecutionMode>("ChatAgent:Mode");
+        if (mode == ChatAgentExecutionMode.Foundry)
+        {
+            services.AddSingleton<IFoundrySessionStore, EfFoundrySessionStore>();
+            services.AddSingleton<TokenCredential>(sp => new DefaultAzureCredential(new DefaultAzureCredentialOptions
+            {
+                ManagedIdentityClientId = sp.GetRequiredService<IOptions<ChatAgentHostingOptions>>().Value.Foundry.ManagedIdentityClientId,
+            }));
+            services.AddHttpClient("FoundryChatAgent", client => client.Timeout = Timeout.InfiniteTimeSpan)
+                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+            services.AddTransient<IChatAgentExecutor>(sp =>
+            {
+                var options = sp.GetRequiredService<IOptions<ChatAgentHostingOptions>>();
+                return new FoundryChatAgentExecutor(
+                    sp.GetRequiredService<IHttpClientFactory>().CreateClient("FoundryChatAgent"),
+                    sp.GetRequiredService<TokenCredential>(), sp.GetRequiredService<IFoundrySessionStore>(), options);
+            });
+        }
+        else
+        {
+            services.AddLocalChatAgent(configuration);
+        }
+        return services;
+    }
+
+    private static void AddChatStorage(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddPersistence(configuration);
+        AddOpenAiOptions(services, configuration);
+        services.AddSingleton<IChatStore, EfChatStore>();
+        services.AddSingleton<IAgentStore, EfAgentStore>();
+    }
+
+    /// <summary>The Foundry process needs the same tools, but no webhooks, Service Bus, or remote executor.</summary>
+    public static IServiceCollection AddHostedChatAgentServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        AddGraphClient(services);
+        // This host reads/writes documents; webhook URLs and subscription secrets don't apply here.
+        services.AddOptions<SharePointOptions>().Bind(configuration.GetSection(SharePointOptions.SectionName))
+            .Validate(o => new[] { o.TenantId, o.ClientId, o.ClientSecret, o.SiteHostname, o.SitePath, o.DocumentLibraryName }
+                .All(value => !string.IsNullOrWhiteSpace(value)), "SharePoint document access settings are required.")
+            .ValidateOnStart();
+        services.AddMemoryCache();
+        services.AddSingleton<SharePointClient>();
+        services.AddSearchQueryServices(configuration);
+        services.AddAttachmentFileServices(configuration);
+        AddChatStorage(services, configuration);
+        return services.AddLocalChatAgent(configuration);
+    }
+
+    private static IServiceCollection AddLocalChatAgent(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<DownloadOptions>().Bind(configuration.GetSection(DownloadOptions.SectionName))
+            .ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<OfficeCliOptions>().Bind(configuration.GetSection(OfficeCliOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => !o.Enabled || o.IsConfigured, "OfficeCli:Command is required when OfficeCli:Enabled is true.").ValidateOnStart();
+
+        // Keep the resource client so each persisted agent can select its own chat deployment.
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<OpenAiOptions>>().Value;
+            return options.UsedManagedIdentity
+                ? new AzureOpenAIClient(new Uri(options.Endpoint), CreateManagedIdentityCredential())
+                : new AzureOpenAIClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey!));
+        });
+
+        services.AddSingleton<SharePointFileCache>();
+
+        // One officecli child process per application, shared by every turn and shut down with the
+        // container, so the provider is a singleton and nothing else may own its lifetime.
+        services.AddSingleton<OfficeCliToolProvider>();
+        services.AddSingleton<ChatAgentContextLoader>();
+        services.AddSingleton<ChatAgentService>();
+        services.AddSingleton<IChatAgentExecutor>(sp => sp.GetRequiredService<ChatAgentService>());
+        return services;
+    }
+
+    public static IServiceCollection AddAttachmentFileServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddPersistence(configuration);
+        AddSearchOptions(services, configuration);
+        AddOpenAiOptions(services, configuration);
+        AddEmbeddingGenerator(services);
+        services.AddOptions<UploadOptions>().Bind(configuration.GetSection(UploadOptions.SectionName))
+            .ValidateDataAnnotations()
+            .Validate(o => o.IsConfigured, "Uploads:ServiceUri is required with managed identity; otherwise Uploads:ConnectionString is required.")
+            .Validate(o => o.ChunkOverlapCharacters < o.ChunkSizeCharacters, "Uploads chunk overlap must be smaller than chunk size.")
+            .ValidateOnStart();
+        services.AddOptions<MarkItDownOptions>().Bind(configuration.GetSection(MarkItDownOptions.SectionName))
+            .ValidateDataAnnotations()
+            .Validate(o => o.IsConfigured, "MarkItDown:Endpoint is required to index uploaded chat attachments.")
+            .ValidateOnStart();
+        services.AddHttpClient<MarkItDownClient>((sp, client) =>
+            client.Timeout = TimeSpan.FromSeconds(sp.GetRequiredService<IOptions<MarkItDownOptions>>().Value.TimeoutSeconds));
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<UploadOptions>>().Value;
+            return options.UsedManagedIdentity
+                ? new BlobServiceClient(new Uri(options.ServiceUri!), CreateManagedIdentityCredential())
+                : new BlobServiceClient(options.ConnectionString!);
+        });
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<SearchOptions>>().Value;
+            return options.UsedManagedIdentity
+                ? new SearchIndexClient(new Uri(options.Endpoint), CreateManagedIdentityCredential())
+                : new SearchIndexClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey!));
+        });
+        services.AddSingleton<ChatMessageAttachmentFileService>();
+        return services;
+    }
+
+    /// <summary>
+    /// Adds operator access to the worker's SQL Server state. Indexed-file views are read-only;
+    /// delta checkpoints can also be reset or deleted.
+    /// </summary>
+    public static IServiceCollection AddIndexStateServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddPersistence(configuration);
+        services.AddSingleton<IIndexStateReader, EfIndexStateReader>();
+        services.AddSingleton<DeltaStateAdminService>();
+        return services;
+    }
+
+    /// <summary>
+    /// Adds targeted reindexing to the API. The API already registers Graph, search, embeddings, MarkItDown,
+    /// and the database through its other service groups; this adds the worker's extraction pipeline.
+    /// </summary>
+    public static IServiceCollection AddIndexedFileReindexServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<DocumentIntelligenceOptions>().Bind(configuration.GetSection(DocumentIntelligenceOptions.SectionName))
+            .Validate(o => string.IsNullOrWhiteSpace(o.Endpoint) || o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "DocumentIntelligence:ApiKey is required when an endpoint is configured and UsedManagedIdentity is false.").ValidateOnStart();
+        services.AddOptions<ProcessorOptions>().Bind(configuration.GetSection(ProcessorOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => o.ChunkOverlapCharacters < o.ChunkSizeCharacters, "Chunk overlap must be smaller than chunk size.")
+            .Validate(o => o.AllowedFileExtensions.Any(x => !string.IsNullOrWhiteSpace(x)), "Processor:AllowedFileExtensions must list at least one file extension.").ValidateOnStart();
+        services.AddHttpClient<DocumentIntelligenceClient>();
+        services.AddSingleton<IContentExtractor, ContentExtractor>();
+        services.AddSingleton<IDeltaStateStore, EfDeltaStateStore>();
+        services.AddSingleton<IFileMetadataStore, EfFileMetadataStore>();
+        services.AddSingleton<ISearchIndexStore, AzureSearchIndexStore>();
+        services.AddSingleton<ISharePointChangeProcessor, SharePointChangeProcessor>();
+        return services;
+    }
+
+    /// <summary>
+    /// Reads <c>ServiceBus:Enabled</c> straight from configuration, before the options system is available,
+    /// so Service Bus clients and the features that consume them are registered together.
+    /// </summary>
+    public static bool IsServiceBusEnabled(this IConfiguration configuration) =>
+        configuration.GetValue($"{ServiceBusOptions.SectionName}:{nameof(ServiceBusOptions.Enabled)}", true);
+
+    /// <summary>
+    /// Reads <c>Processor:ChangeSignalListenerEnabled</c> the same way. The listener also needs Service Bus,
+    /// so it only runs when <see cref="IsServiceBusEnabled"/> is true as well.
+    /// </summary>
+    public static bool IsChangeSignalListenerEnabled(this IConfiguration configuration) =>
+        configuration.GetValue($"{ProcessorOptions.SectionName}:{nameof(ProcessorOptions.ChangeSignalListenerEnabled)}", true)
+        && configuration.IsServiceBusEnabled();
+
+    public static IServiceCollection AddChangeProcessorServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        var serviceBusEnabled = configuration.IsServiceBusEnabled();
+
+        AddGraphClient(services);
+        AddSharePointOptions(services, configuration);
+        AddServiceBusOptions(services, configuration, required: false);
+        AddSearchOptions(services, configuration);
+        AddOpenAiOptions(services, configuration);
+        services.AddPersistence(configuration);
+        services.AddOptions<DocumentIntelligenceOptions>().Bind(configuration.GetSection(DocumentIntelligenceOptions.SectionName))
+            .Validate(o => string.IsNullOrWhiteSpace(o.Endpoint) || o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "DocumentIntelligence:ApiKey is required when an endpoint is configured and UsedManagedIdentity is false.").ValidateOnStart();
+        services.AddOptions<MarkItDownOptions>().Bind(configuration.GetSection(MarkItDownOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => o.IsConfigured, "MarkItDown:Endpoint is required; DOCX, PPTX, and XLSX files are converted to markdown by the MarkItDown service.").ValidateOnStart();
+        services.AddOptions<ProcessorOptions>().Bind(configuration.GetSection(ProcessorOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => o.ChunkOverlapCharacters < o.ChunkSizeCharacters, "Chunk overlap must be smaller than chunk size.")
+            .Validate(o => o.AllowedFileExtensions.Any(x => !string.IsNullOrWhiteSpace(x)), "Processor:AllowedFileExtensions must list at least one file extension.").ValidateOnStart();
+        services.AddMemoryCache();
+        services.AddSingleton<SharePointClient>();
+        services.AddSingleton<SubscriptionManager>();
+        services.AddHttpClient<DocumentIntelligenceClient>();
+
+        // Conversion of a large file is a single long request, so the client carries its own timeout
+        // rather than the 100 second default.
+        services.AddHttpClient<MarkItDownClient>((sp, client) =>
+            client.Timeout = TimeSpan.FromSeconds(sp.GetRequiredService<IOptions<MarkItDownOptions>>().Value.TimeoutSeconds));
+        services.AddSingleton<IContentExtractor, ContentExtractor>();
+        AddEmbeddingGenerator(services);
+
+        if (serviceBusEnabled)
+        {
+            AddServiceBusClient(services);
+        }
+        services.AddSingleton<IDeltaStateStore, EfDeltaStateStore>();
+        services.AddSingleton<IFileMetadataStore, EfFileMetadataStore>();
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<SearchOptions>>().Value;
+            return options.UsedManagedIdentity
+                ? new SearchIndexClient(new Uri(options.Endpoint), CreateManagedIdentityCredential())
+                : new SearchIndexClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey!));
+        });
+        AddSearchClient(services);
+        services.AddSingleton<ISearchIndexStore, AzureSearchIndexStore>();
+        services.AddSingleton<ISharePointChangeProcessor, SharePointChangeProcessor>();
+        return services;
+    }
+
+    internal static TokenCredential CreateManagedIdentityCredential() =>
+        new ManagedIdentityCredential(ManagedIdentityId.SystemAssigned);
+
+    private static void AddSharePointOptions(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<SharePointOptions>().Bind(configuration.GetSection(SharePointOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => !o.SubscriptionRenewalEnabled || !string.IsNullOrWhiteSpace(o.NotificationUrl), "SharePoint:NotificationUrl is required when SubscriptionRenewalEnabled is true.").ValidateOnStart();
+    }
+
+    private static void AddSearchOptions(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<SearchOptions>().Bind(configuration.GetSection(SearchOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "AzureSearch:ApiKey is required when UsedManagedIdentity is false.").ValidateOnStart();
+    }
+
+    private static void AddOpenAiOptions(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<OpenAiOptions>().Bind(configuration.GetSection(OpenAiOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => o.UsedManagedIdentity || !string.IsNullOrWhiteSpace(o.ApiKey), "AzureOpenAI:ApiKey is required when UsedManagedIdentity is false.")
+            .Validate(o => IsResourceRootEndpoint(o.Endpoint), "AzureOpenAI:Endpoint must be the resource endpoint without an API path, for example https://<resource>.services.ai.azure.com; the SDK appends the deployment path itself, so a base URL ending in /openai/v1 returns 404.").ValidateOnStart();
+    }
+
+    /// <summary>
+    /// Registers the Azure OpenAI embedding generator. <c>AzureSearch:VectorDimensions</c> becomes the
+    /// generator's default dimension count, so the index definition and the embeddings cannot drift apart.
+    /// </summary>
+    private static void AddEmbeddingGenerator(IServiceCollection services)
+    {
+        services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<OpenAiOptions>>().Value;
+            var dimensions = sp.GetRequiredService<IOptions<SearchOptions>>().Value.VectorDimensions;
+
+            // The service version travels with the Azure OpenAI package rather than with configuration.
+            var clientOptions = new AzureOpenAIClientOptions();
+            var client = options.UsedManagedIdentity
+                ? new AzureOpenAIClient(new Uri(options.Endpoint), CreateManagedIdentityCredential(), clientOptions)
+                : new AzureOpenAIClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey!), clientOptions);
+            return client.GetEmbeddingClient(options.EmbeddingDeployment).AsIEmbeddingGenerator(dimensions);
+        });
+    }
+
+    /// <summary>
+    /// True when the endpoint is the resource root the Azure OpenAI SDK expects. The SDK appends the
+    /// deployment path itself, so a configured path such as the Foundry portal's <c>/openai/v1</c> base URL
+    /// would be doubled into <c>/openai/v1/openai/deployments/...</c> and return 404 on every request.
+    /// </summary>
+    private static bool IsResourceRootEndpoint(string endpoint) =>
+        !Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) || uri.AbsolutePath.Trim('/').Length == 0;
+
+    private static void AddSearchClient(IServiceCollection services)
+    {
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<SearchOptions>>().Value;
+            return options.UsedManagedIdentity
+                ? new SearchClient(new Uri(options.Endpoint), options.SharePointIndexName, CreateManagedIdentityCredential())
+                : new SearchClient(new Uri(options.Endpoint), options.SharePointIndexName, new AzureKeyCredential(options.ApiKey!));
+        });
+    }
+
+    /// <summary>
+    /// Binds the Service Bus settings. Connection settings are only required when Service Bus is enabled;
+    /// set <paramref name="required"/> for applications that cannot run without it.
+    /// </summary>
+    private static void AddServiceBusOptions(IServiceCollection services, IConfiguration configuration, bool required)
+    {
+        var options = services.AddOptions<ServiceBusOptions>().Bind(configuration.GetSection(ServiceBusOptions.SectionName)).ValidateDataAnnotations()
+            .Validate(o => !o.Enabled || o.IsConfigured, "ServiceBus:FullyQualifiedNamespace is required with managed identity; otherwise ServiceBus:ConnectionString is required.");
+        if (required)
+        {
+            options.Validate(o => o.Enabled, "ServiceBus:Enabled must be true; this application publishes SharePoint change signals to Service Bus.");
+        }
+        options.ValidateOnStart();
+    }
+
+    private static void AddServiceBusClient(IServiceCollection services)
+    {
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<ServiceBusOptions>>().Value;
+            return options.UsedManagedIdentity
+                ? new ServiceBusClient(options.FullyQualifiedNamespace!, CreateManagedIdentityCredential())
+                : new ServiceBusClient(options.ConnectionString!);
+        });
+    }
+
+    private static void AddGraphClient(IServiceCollection services)
+    {
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<SharePointOptions>>().Value;
+            var credential = new ClientSecretCredential(options.TenantId, options.ClientId, options.ClientSecret);
+            return new GraphServiceClient(credential, ["https://graph.microsoft.com/.default"]);
+        });
+    }
+}

@@ -1,7 +1,10 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
-using SharePointToAzureSearch.Core;
+using SharePointToAzureSearch.Application;
+using SharePointToAzureSearch.Domain;
+using SharePointToAzureSearch.Infrastructure;
+using SharePointToAzureSearch.Persistence;
 
 const string FrontendCorsPolicy = "frontend";
 const string NotificationUrlError =
@@ -482,7 +485,7 @@ app.MapDelete("/api/subscriptions/{id}", (
 app.MapGet("/api/agents/default-instructions", (IOptions<OpenAiOptions> openAiOptions) =>
     Results.Ok(new
     {
-        instructions = ChatAgentService.GetDefaultInstructions(),
+        instructions = AgentDefaults.Instructions,
         modelId = openAiOptions.Value.ChatDeployment,
     }));
 
@@ -509,7 +512,7 @@ app.MapPost("/api/agents", async (
         ? openAiOptions.Value.ChatDeployment
         : body.ModelId.Trim();
     var instructions = string.IsNullOrWhiteSpace(body?.Instructions)
-        ? ChatAgentService.GetDefaultInstructions()
+        ? AgentDefaults.Instructions
         : body.Instructions.Trim();
     var error = ValidateAgentDefinition(name, modelId, instructions);
     if (error is not null)

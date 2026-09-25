@@ -12,7 +12,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using SharePointToAzureSearch.AgentHost;
-using SharePointToAzureSearch.Core;
+using SharePointToAzureSearch.Application;
+using SharePointToAzureSearch.Domain;
+using SharePointToAzureSearch.Infrastructure;
 using Xunit;
 
 namespace SharePointToAzureSearch.Tests;

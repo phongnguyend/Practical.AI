@@ -1,14 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
-  <ItemGroup>
-    <ProjectReference Include="..\SharePointToAzureSearch.Core\SharePointToAzureSearch.Core.csproj" />
-  </ItemGroup>
-
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>SharePointToAzureSearch.aa86af98-b197-450b-8db6-45521bab965d</UserSecretsId>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The API queries the Entity Framework Core model directly where a store method would be more than
+         an endpoint needs, so it references the persistence layer as well as the composition root. -->
+    <ProjectReference Include="..\SharePointToAzureSearch.Infrastructure\SharePointToAzureSearch.Infrastructure.csproj" />
+    <ProjectReference Include="..\SharePointToAzureSearch.Persistence\SharePointToAzureSearch.Persistence.csproj" />
+  </ItemGroup>
 
 </Project>

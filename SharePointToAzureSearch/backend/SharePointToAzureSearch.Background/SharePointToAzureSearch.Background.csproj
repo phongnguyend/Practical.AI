@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SharePointToAzureSearch.Core\SharePointToAzureSearch.Core.csproj" />
+    <ProjectReference Include="..\SharePointToAzureSearch.Infrastructure\SharePointToAzureSearch.Infrastructure.csproj" />
   </ItemGroup>
+
 </Project>

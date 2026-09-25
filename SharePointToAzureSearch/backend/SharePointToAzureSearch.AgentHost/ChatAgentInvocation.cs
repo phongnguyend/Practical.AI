@@ -1,4 +1,5 @@
-using SharePointToAzureSearch.Core;
+using SharePointToAzureSearch.Application;
+using SharePointToAzureSearch.Infrastructure;
 using Azure.AI.AgentServer.Invocations;
 
 namespace SharePointToAzureSearch.AgentHost;
