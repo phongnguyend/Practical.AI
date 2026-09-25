@@ -91,10 +91,10 @@ Bicep does not deploy this project's images, SharePoint settings, or application
 
 ```powershell
 az acr build --registry $registry --image "${apiImageRepository}:$imageTag" `
-  --file src/SharePointToAzureSearch.Api/Dockerfile .
+  --file backend/SharePointToAzureSearch.Api/Dockerfile .
 
 az acr build --registry $registry --image "${workerImageRepository}:$imageTag" `
-  --file src/SharePointToAzureSearch.Background/Dockerfile .
+  --file backend/SharePointToAzureSearch.Background/Dockerfile .
 ```
 
 Configure the application secrets and environment variables first, either in the same release pipeline or with `az containerapp secret set` and `az containerapp update --set-env-vars`. Then deploy the newly built images and activate the application replicas:
@@ -187,8 +187,8 @@ Each Azure service has its own `UsedManagedIdentity` setting. Set it to `true` t
 
 ```powershell
 dotnet restore
-dotnet run --project src/SharePointToAzureSearch.Api
-dotnet run --project src/SharePointToAzureSearch.Background
+dotnet run --project backend/SharePointToAzureSearch.Api
+dotnet run --project backend/SharePointToAzureSearch.Background
 ```
 
 `Processor:SyncOnStartup` defaults to `true`, so existing documents are indexed immediately rather than waiting for the next webhook or scheduled tick. Both the change signal listener and the scheduled synchronization honour it, so the startup pass happens whichever trigger is enabled. When both are enabled the second request is a no-op: passes are serialized, and the first one has already advanced the delta checkpoint. Service Bus notifications after that advance the checkpoint further.
@@ -314,13 +314,13 @@ The schema is defined by `SharePointIndexDbContext` and applied by Entity Framew
 Turn `AutoMigrate` off where the login has no DDL rights, and apply the schema from the pipeline instead:
 
 ```bash
-dotnet ef migrations script --idempotent   --project src/SharePointToAzureSearch.Core --output schema.sql
+dotnet ef migrations script --idempotent   --project backend/SharePointToAzureSearch.Core --output schema.sql
 ```
 
 Changing a table, a column, or an index means changing the model and generating a migration for it, rather than editing the database by hand:
 
 ```bash
-cd src/SharePointToAzureSearch.Core
+cd backend/SharePointToAzureSearch.Core
 dotnet ef migrations add <Name>
 dotnet ef database update      # or let AutoMigrate apply it on the next start
 ```

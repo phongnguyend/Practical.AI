@@ -32,7 +32,7 @@ and offers a save button. Indexed-file previews fetch the current SharePoint ver
 tabs to select worksheets and controls to move through larger sheets. The grid displays common cell
 formatting, number formats, column widths, row heights, and merged cells.
 
-The API must be running first. From `src/SharePointToAzureSearch.Api`:
+The API must be running first. From `backend/SharePointToAzureSearch.Api`:
 
 ```bash
 dotnet run
