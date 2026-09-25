@@ -73,6 +73,14 @@ namespace SharePointToAzureSearch.Core.Migrations
                     b.Property<long>("InputTokenCount")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("FoundryEndpoint")
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.Property<string>("FoundrySessionId")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<long>("OutputTokenCount")
                         .HasColumnType("bigint");
 

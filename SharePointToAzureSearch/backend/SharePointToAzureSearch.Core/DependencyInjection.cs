@@ -53,8 +53,61 @@ public static class DependencyInjection
     /// </summary>
     public static IServiceCollection AddChatServices(this IServiceCollection services, IConfiguration configuration)
     {
+        AddChatStorage(services, configuration);
+        services.AddOptions<ChatAgentHostingOptions>().Bind(configuration.GetSection(ChatAgentHostingOptions.SectionName))
+            .ValidateDataAnnotations().ValidateOnStart();
+        var mode = configuration.GetValue<ChatAgentExecutionMode>("ChatAgent:Mode");
+        if (mode == ChatAgentExecutionMode.Foundry)
+        {
+            services.AddSingleton<IFoundrySessionStore, EfFoundrySessionStore>();
+            services.AddSingleton<TokenCredential>(sp => new DefaultAzureCredential(new DefaultAzureCredentialOptions
+            {
+                ManagedIdentityClientId = sp.GetRequiredService<IOptions<ChatAgentHostingOptions>>().Value.Foundry.ManagedIdentityClientId,
+            }));
+            services.AddHttpClient("FoundryChatAgent", client => client.Timeout = Timeout.InfiniteTimeSpan)
+                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+            services.AddTransient<IChatAgentExecutor>(sp =>
+            {
+                var options = sp.GetRequiredService<IOptions<ChatAgentHostingOptions>>();
+                return new FoundryChatAgentExecutor(
+                    sp.GetRequiredService<IHttpClientFactory>().CreateClient("FoundryChatAgent"),
+                    sp.GetRequiredService<TokenCredential>(), sp.GetRequiredService<IFoundrySessionStore>(), options);
+            });
+        }
+        else
+        {
+            services.AddLocalChatAgent(configuration);
+        }
+        return services;
+    }
+
+    private static void AddChatStorage(IServiceCollection services, IConfiguration configuration)
+    {
         AddDatabase(services, configuration);
         AddOpenAiOptions(services, configuration);
+        services.AddSingleton<IChatStore, EfChatStore>();
+        services.AddSingleton<IAgentStore, EfAgentStore>();
+    }
+
+    /// <summary>The Foundry process needs the same tools, but no webhooks, Service Bus, or remote executor.</summary>
+    public static IServiceCollection AddHostedChatAgentServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        AddGraphClient(services);
+        // This host reads/writes documents; webhook URLs and subscription secrets don't apply here.
+        services.AddOptions<SharePointOptions>().Bind(configuration.GetSection(SharePointOptions.SectionName))
+            .Validate(o => new[] { o.TenantId, o.ClientId, o.ClientSecret, o.SiteHostname, o.SitePath, o.DocumentLibraryName }
+                .All(value => !string.IsNullOrWhiteSpace(value)), "SharePoint document access settings are required.")
+            .ValidateOnStart();
+        services.AddMemoryCache();
+        services.AddSingleton<SharePointClient>();
+        services.AddSearchQueryServices(configuration);
+        services.AddAttachmentFileServices(configuration);
+        AddChatStorage(services, configuration);
+        return services.AddLocalChatAgent(configuration);
+    }
+
+    private static IServiceCollection AddLocalChatAgent(this IServiceCollection services, IConfiguration configuration)
+    {
         services.AddOptions<DownloadOptions>().Bind(configuration.GetSection(DownloadOptions.SectionName))
             .ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<OfficeCliOptions>().Bind(configuration.GetSection(OfficeCliOptions.SectionName)).ValidateDataAnnotations()
@@ -69,14 +122,14 @@ public static class DependencyInjection
                 : new AzureOpenAIClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey!));
         });
 
-        services.AddSingleton<IChatStore, EfChatStore>();
-        services.AddSingleton<IAgentStore, EfAgentStore>();
         services.AddSingleton<SharePointFileCache>();
 
         // One officecli child process per application, shared by every turn and shut down with the
         // container, so the provider is a singleton and nothing else may own its lifetime.
         services.AddSingleton<OfficeCliToolProvider>();
+        services.AddSingleton<ChatAgentContextLoader>();
         services.AddSingleton<ChatAgentService>();
+        services.AddSingleton<IChatAgentExecutor>(sp => sp.GetRequiredService<ChatAgentService>());
         return services;
     }
 

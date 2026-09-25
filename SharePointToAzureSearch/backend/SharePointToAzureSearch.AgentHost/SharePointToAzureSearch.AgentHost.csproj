@@ -1,0 +1,12 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>SharePointToAzureSearch.aa86af98-b197-450b-8db6-45521bab965d</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../SharePointToAzureSearch.Core/SharePointToAzureSearch.Core.csproj" />
+    <PackageReference Include="Azure.AI.AgentServer.Invocations" Version="1.0.0-beta.7" />
+  </ItemGroup>
+</Project>

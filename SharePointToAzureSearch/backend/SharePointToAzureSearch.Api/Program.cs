@@ -635,7 +635,7 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
     ChatTurnRequest body,
     IChatStore store,
     IAgentStore agentStore,
-    ChatAgentService agent,
+    IChatAgentExecutor agent,
     ChatMessageAttachmentFileService attachmentFiles,
     ILogger<Program> logger,
     HttpResponse response,
@@ -675,7 +675,6 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
     {
         return Results.BadRequest(new { error = ex.Message });
     }
-    var history = await store.ListMessagesAsync(id, cancellationToken);
 
     // The question is stored before the model runs, so a failed or cancelled turn still leaves the
     // conversation showing what was asked.
@@ -692,33 +691,15 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
 
     // A conversation created from the sidebar has no title until its first question supplies one.
     var renamed = conversation.Title;
-    if (history.Count == 0 && conversation.Title == "New chat")
+    if (conversation.MessageCount == 0 && conversation.Title == "New chat")
     {
         renamed = content.Length <= 60 ? content : content[..60].TrimEnd() + "…";
         await store.RenameConversationAsync(id, renamed, cancellationToken);
     }
 
-    response.ContentType = "application/x-ndjson; charset=utf-8";
-    response.Headers.CacheControl = "no-cache, no-transform";
-    response.Headers.Append("X-Accel-Buffering", "no");
-
-    var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-    using var streamWriteLock = new SemaphoreSlim(1, 1);
-    async ValueTask WriteEventAsync(ChatStreamEvent item, CancellationToken token)
-    {
-        // Tools may run concurrently. Keep each JSON object and its newline together on the wire.
-        await streamWriteLock.WaitAsync(token);
-        try
-        {
-            await JsonSerializer.SerializeAsync(response.Body, item, jsonOptions, token);
-            await response.WriteAsync("\n", token);
-            await response.Body.FlushAsync(token);
-        }
-        finally
-        {
-            streamWriteLock.Release();
-        }
-    }
+    using var streamWriter = new ChatStreamWriter<ChatStreamEvent>(response);
+    streamWriter.Start();
+    ValueTask WriteEventAsync(ChatStreamEvent item, CancellationToken token) => streamWriter.WriteAsync(item, token);
 
     await WriteEventAsync(new ChatStreamEvent("started", Question: question, Title: renamed), cancellationToken);
 
@@ -726,12 +707,7 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
     try
     {
         turn = await agent.RunStreamingAsync(
-            id,
-            history,
-            question,
-            conversation.UserId,
-            selectedAgent.ModelId,
-            selectedAgent.Instructions,
+            new ChatAgentRequest(id, question.Id),
             (text, token) => WriteEventAsync(new ChatStreamEvent("delta", Text: text), token),
             (status, token) => WriteEventAsync(new ChatStreamEvent("status", Message: status), token),
             cancellationToken);

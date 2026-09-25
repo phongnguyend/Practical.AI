@@ -71,6 +71,8 @@ export default function ChatPage() {
   const [attachments, setAttachments] = useState<ChatMessageAttachment[]>([])
   const [uploading, setUploading] = useState(false)
   const threadRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const wasSendingRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const agentMenuRef = useRef<HTMLDivElement>(null)
   const agentMenuButtonRef = useRef<HTMLButtonElement>(null)
@@ -82,6 +84,14 @@ export default function ChatPage() {
         active.agentId ? item.id === active.agentId : item.name.toLowerCase() === 'default',
       )
     : null
+
+  useEffect(() => {
+    // Wait for the render that re-enables the textbox before restoring keyboard focus.
+    if (wasSendingRef.current && !sending) {
+      composerRef.current?.focus({ preventScroll: true })
+    }
+    wasSendingRef.current = sending
+  }, [sending])
 
   const open = (id: string | null) => {
     setActiveId(id)
@@ -512,6 +522,7 @@ export default function ChatPage() {
                 </div>
               ) : null}
               <textarea
+                ref={composerRef}
                 rows={2}
                 placeholder="Ask about the indexed documents…   (Enter to send, Shift+Enter for a new line)"
                 value={draft}

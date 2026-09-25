@@ -5,6 +5,8 @@
     <Platform Name="x86" />
   </Configurations>
   <Project Path="SharePointToAzureSearch.Api/SharePointToAzureSearch.Api.csproj" />
+  <Project Path="SharePointToAzureSearch.AgentHost/SharePointToAzureSearch.AgentHost.csproj" />
   <Project Path="SharePointToAzureSearch.Background/SharePointToAzureSearch.Background.csproj" />
   <Project Path="SharePointToAzureSearch.Core/SharePointToAzureSearch.Core.csproj" />
+  <Project Path="SharePointToAzureSearch.Tests/SharePointToAzureSearch.Tests.csproj" />
 </Solution>

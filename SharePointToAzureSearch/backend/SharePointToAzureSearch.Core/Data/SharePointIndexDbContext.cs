@@ -93,6 +93,8 @@ public sealed class SharePointIndexDbContext(DbContextOptions<SharePointIndexDbC
             entity.Property(x => x.Id).ValueGeneratedNever();
             entity.Property(x => x.Title).HasMaxLength(200).IsRequired();
             entity.Property(x => x.UserId).HasMaxLength(200);
+            entity.Property(x => x.FoundryEndpoint).HasMaxLength(2048);
+            entity.Property(x => x.FoundrySessionId).HasMaxLength(200);
             entity.Property(x => x.CreatedAtUtc).HasPrecision(7);
             entity.Property(x => x.UpdatedAtUtc).HasPrecision(7);
 

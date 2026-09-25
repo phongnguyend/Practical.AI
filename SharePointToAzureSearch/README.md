@@ -476,6 +476,8 @@ Two requirements that indexing alone does not give you:
 
 ### Editing a file with officecli
 
+For running the same agent inside the API or in a Foundry Hosted Agent sandbox, see [agent hosting options](backend/SharePointToAzureSearch.AgentHost/README.md). Both modes retain SQL conversation history, streamed answers, and tool-status reports; `ChatAgent:Mode` defaults to `Local`.
+
 [officecli](https://www.npmjs.com/package/@officecli/officecli) is a command line over `.docx`, `.xlsx`, and `.pptx` files that also runs as an [MCP](https://modelcontextprotocol.io/) server. The assistant connects to it with the MCP C# SDK (`ModelContextProtocol.Core`) and adds whatever tools it publishes — one, `officecli`, which takes an officecli command line — to its own four. Since officecli only reaches files on this host, the pairing is `download_file` first, then officecli on the `localPath` it returned; the instructions say as much, and that an edit to the local copy is not a change in SharePoint until `upload_file` sends it back.
 
 They also require added or changed content to match the style of the document around it: read the neighbouring paragraphs, rows, or shapes and their properties first, reuse the style, font, spacing, list format, table formatting, and slide layout they use rather than leaving default-formatted content behind, follow the document's own wording conventions, and check the result before reporting the edit as done.

@@ -31,20 +31,14 @@ public sealed record ChatTokenUsage(long InputTokens, long OutputTokens, long To
 /// downloaded file before sending it back.
 /// </summary>
 public sealed class ChatAgentService(
+    ChatAgentContextLoader contextLoader,
     AzureOpenAIClient openAiClient,
     ISearchQueryStore searchStore,
     ChatMessageAttachmentFileService attachmentFiles,
     SharePointFileCache files,
     OfficeCliToolProvider officeCli,
-    ILogger<ChatAgentService> logger)
+    ILogger<ChatAgentService> logger) : IChatAgentExecutor
 {
-    /// <summary>
-    /// How many turns of a conversation are replayed to the model. The whole history would grow past
-    /// the context window on a long conversation; the most recent turns are what a follow-up question
-    /// actually depends on.
-    /// </summary>
-    private const int MaxHistoryMessages = 40;
-
     private const string Instructions = """
         You answer questions about a SharePoint document library that has been indexed into Azure AI Search.
 
@@ -109,6 +103,18 @@ public sealed class ChatAgentService(
     public static string GetDefaultInstructions() => Instructions;
 
     public async Task<ChatTurn> RunStreamingAsync(
+        ChatAgentRequest request,
+        Func<string, CancellationToken, ValueTask> onText,
+        Func<string, CancellationToken, ValueTask> onStatus,
+        CancellationToken cancellationToken)
+    {
+        var context = await contextLoader.LoadAsync(request, cancellationToken);
+        return await RunStreamingCoreAsync(
+            context.Conversation.Id, context.History, context.Question, context.Conversation.UserId,
+            context.Agent.ModelId, context.Agent.Instructions, onText, onStatus, cancellationToken);
+    }
+
+    private async Task<ChatTurn> RunStreamingCoreAsync(
         Guid conversationId,
         IReadOnlyList<ChatMessageRecord> history,
         ChatMessageRecord question,
@@ -164,7 +170,7 @@ public sealed class ChatAgentService(
             },
         });
 
-        var recentHistory = history.TakeLast(MaxHistoryMessages).ToArray();
+        var recentHistory = history;
         var availableAttachments = await attachmentFiles.ListConversationAttachmentsAsync(conversationId, cancellationToken);
         var idsInMessages = recentHistory
             .SelectMany(message => message.Attachments)
