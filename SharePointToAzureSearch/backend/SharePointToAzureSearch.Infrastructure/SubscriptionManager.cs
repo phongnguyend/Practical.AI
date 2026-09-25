@@ -12,7 +12,7 @@ namespace SharePointToAzureSearch.Infrastructure;
 /// </summary>
 public sealed class SubscriptionManager(
     SharePointClient sharePointClient,
-    IWebhookSubscriptionStore subscriptionStore,
+    IWebhookSubscriptionRepository subscriptionRepository,
     IOptions<SharePointOptions> options,
     ILogger<SubscriptionManager> logger)
 {
@@ -24,7 +24,7 @@ public sealed class SubscriptionManager(
     public async Task<SubscriptionOverview> GetOverviewAsync(CancellationToken cancellationToken)
     {
         var definition = await GetDefaultDefinitionAsync(cancellationToken);
-        var definitions = await subscriptionStore.ListAsync(cancellationToken);
+        var definitions = await subscriptionRepository.ListAsync(cancellationToken);
         var resource = await GetExpectedResourceAsync(cancellationToken);
         var subscriptions = await sharePointClient.ListSubscriptionsAsync(cancellationToken);
         var graphRecords = subscriptions
@@ -94,7 +94,7 @@ public sealed class SubscriptionManager(
             cancellationToken);
         try
         {
-            var saved = await subscriptionStore.CreateAsync(
+            var saved = await subscriptionRepository.CreateAsync(
                 created.Id, normalizedName, url, customClientState, lifetimeDays, cancellationToken);
             return ToView(created, resource, definition, saved);
         }
@@ -124,7 +124,7 @@ public sealed class SubscriptionManager(
     {
         var definition = await GetDefaultDefinitionAsync(cancellationToken);
         var resource = await GetExpectedResourceAsync(cancellationToken);
-        var definitions = await subscriptionStore.ListAsync(cancellationToken);
+        var definitions = await subscriptionRepository.ListAsync(cancellationToken);
         var all = await sharePointClient.ListSubscriptionsAsync(cancellationToken);
         var databaseDefinition = Guid.TryParse(id, out var databaseId)
             ? definitions.FirstOrDefault(item => item.Id == databaseId)
@@ -173,7 +173,7 @@ public sealed class SubscriptionManager(
                 cancellationToken);
             try
             {
-                var savedDefinition = await subscriptionStore.UpdateAsync(
+                var savedDefinition = await subscriptionRepository.UpdateAsync(
                     databaseDefinition.Id,
                     createdForRecord.Id,
                     recordName,
@@ -239,7 +239,7 @@ public sealed class SubscriptionManager(
 
         if (!nameChanged && !urlChanged && !clientStateChanged)
         {
-            currentDefinition = await subscriptionStore.UpdateAsync(
+            currentDefinition = await subscriptionRepository.UpdateAsync(
                 currentDefinition.Id,
                 current.Id,
                 normalizedName,
@@ -267,7 +267,7 @@ public sealed class SubscriptionManager(
             effectiveClientState ?? SubscriptionClientState.Create(normalizedName, _options.ClientState),
             cancellationToken);
 
-        currentDefinition = await subscriptionStore.UpdateAsync(
+        currentDefinition = await subscriptionRepository.UpdateAsync(
             currentDefinition.Id,
             created.Id,
             normalizedName,
@@ -310,7 +310,7 @@ public sealed class SubscriptionManager(
 
     public async Task SetAutoRenewAsync(Guid databaseId, bool enabled, CancellationToken cancellationToken)
     {
-        if (!await subscriptionStore.SetAutoRenewAsync(databaseId, enabled, cancellationToken))
+        if (!await subscriptionRepository.SetAutoRenewAsync(databaseId, enabled, cancellationToken))
         {
             throw new KeyNotFoundException($"No tracked subscription with ID '{databaseId}'.");
         }
@@ -325,7 +325,7 @@ public sealed class SubscriptionManager(
         // Graph's PATCH response is not returned by the client, so the refreshed list is what confirms
         // the new expiry rather than the value that was requested.
         var resource = await GetExpectedResourceAsync(cancellationToken);
-        var definitions = await subscriptionStore.ListAsync(cancellationToken);
+        var definitions = await subscriptionRepository.ListAsync(cancellationToken);
         var subscriptions = await sharePointClient.ListSubscriptionsAsync(cancellationToken);
         var renewed = subscriptions.FirstOrDefault(x => x.Id == id)
             ?? new GraphSubscription(id, resource, definition.NotificationUrl, expiration, null);
@@ -339,7 +339,7 @@ public sealed class SubscriptionManager(
     public async Task DeleteAsync(string id, CancellationToken cancellationToken)
     {
         var definition = await GetDefaultDefinitionAsync(cancellationToken);
-        var definitions = await subscriptionStore.ListAsync(cancellationToken);
+        var definitions = await subscriptionRepository.ListAsync(cancellationToken);
         var resource = await GetExpectedResourceAsync(cancellationToken);
         var all = await sharePointClient.ListSubscriptionsAsync(cancellationToken);
         var current = all.FirstOrDefault(x => x.Id == id);
@@ -350,7 +350,7 @@ public sealed class SubscriptionManager(
         }
 
         await sharePointClient.DeleteSubscriptionAsync(id, cancellationToken);
-        await subscriptionStore.DeleteAsync(id, cancellationToken);
+        await subscriptionRepository.DeleteAsync(id, cancellationToken);
     }
 
     private void ThrowIfUrlTaken(IEnumerable<GraphSubscription> subscriptions, string url, string? exceptId)
@@ -369,7 +369,7 @@ public sealed class SubscriptionManager(
     public async Task<IReadOnlyList<EnsureSubscriptionResult>> EnsureEnabledAsync(CancellationToken cancellationToken)
     {
         var defaultDefinition = await GetDefaultDefinitionAsync(cancellationToken);
-        var definitions = await subscriptionStore.ListAsync(cancellationToken);
+        var definitions = await subscriptionRepository.ListAsync(cancellationToken);
         var resource = await GetExpectedResourceAsync(cancellationToken);
         var subscriptions = (await sharePointClient.ListSubscriptionsAsync(cancellationToken)).ToList();
         var results = new List<EnsureSubscriptionResult>();
@@ -413,7 +413,7 @@ public sealed class SubscriptionManager(
                 definition.NotificationUrl,
                 definition.ClientState ?? SubscriptionClientState.Create(definition.Name, _options.ClientState),
                 cancellationToken);
-            definition = await subscriptionStore.UpdateAsync(
+            definition = await subscriptionRepository.UpdateAsync(
                 definition.Id,
                 created.Id,
                 definition.Name,
@@ -428,7 +428,7 @@ public sealed class SubscriptionManager(
                 ToView(created, resource, isDefault ? definition : defaultDefinition, definition));
         }
 
-        definition = await subscriptionStore.UpdateAsync(
+        definition = await subscriptionRepository.UpdateAsync(
             definition.Id,
             existing.Id,
             definition.Name,
@@ -451,7 +451,7 @@ public sealed class SubscriptionManager(
 
     private async Task<WebhookSubscriptionDefinition> GetDefaultDefinitionAsync(
         CancellationToken cancellationToken) =>
-        await subscriptionStore.GetByNameAsync(WebhookSubscriptionDefaults.Name, cancellationToken)
+        await subscriptionRepository.GetByNameAsync(WebhookSubscriptionDefaults.Name, cancellationToken)
             ?? throw new InvalidOperationException("The default webhook subscription is unavailable.");
 
     private async Task<string> GetExpectedResourceAsync(CancellationToken cancellationToken) =>
@@ -572,7 +572,7 @@ public sealed class SubscriptionManager(
         string? exceptGraphSubscriptionId,
         CancellationToken cancellationToken)
     {
-        var definitions = await subscriptionStore.ListAsync(cancellationToken);
+        var definitions = await subscriptionRepository.ListAsync(cancellationToken);
         if (definitions.Any(item =>
                 !string.Equals(item.GraphSubscriptionId, exceptGraphSubscriptionId, StringComparison.Ordinal) &&
                 string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)))

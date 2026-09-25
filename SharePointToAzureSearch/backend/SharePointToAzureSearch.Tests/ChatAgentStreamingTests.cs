@@ -68,7 +68,7 @@ public sealed class ChatAgentStreamingTests
     public async Task SendsOnlyIdentifiersAndReusesSavedSandboxWithBearerAuthentication()
     {
         var request = new ChatAgentRequest(Guid.NewGuid(), Guid.NewGuid());
-        var sessions = Substitute.For<IFoundrySessionStore>();
+        var sessions = Substitute.For<IFoundrySessionRepository>();
         const string endpoint = "https://example.com/invocations?api-version=v1";
         sessions.GetAsync(request.ConversationId, endpoint, Arg.Any<CancellationToken>()).Returns("saved-session");
         using var http = new HttpClient(new StubHttpHandler(async (message, ct) =>
@@ -169,14 +169,14 @@ public sealed class ChatAgentStreamingTests
         return app;
     }
 
-    private static IFoundrySessionStore EmptySessions()
+    private static IFoundrySessionRepository EmptySessions()
     {
-        var sessions = Substitute.For<IFoundrySessionStore>();
+        var sessions = Substitute.For<IFoundrySessionRepository>();
         sessions.GetAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((string?)null);
         return sessions;
     }
 
-    private static FoundryChatAgentExecutor Proxy(HttpClient http, IFoundrySessionStore? sessions = null,
+    private static FoundryChatAgentExecutor Proxy(HttpClient http, IFoundrySessionRepository? sessions = null,
         string endpoint = "https://example.com/invocations", TestCredential? credential = null) =>
         new(http, credential ?? new TestCredential(), sessions ?? EmptySessions(),
             Options.Create(new ChatAgentHostingOptions { Mode = ChatAgentExecutionMode.Foundry, Foundry = new() { Endpoint = endpoint } }));

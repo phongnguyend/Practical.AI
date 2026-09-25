@@ -63,7 +63,6 @@ public static class DependencyInjection
         var mode = configuration.GetValue<ChatAgentExecutionMode>("ChatAgent:Mode");
         if (mode == ChatAgentExecutionMode.Foundry)
         {
-            services.AddSingleton<IFoundrySessionStore, EfFoundrySessionStore>();
             services.AddSingleton<TokenCredential>(sp => new DefaultAzureCredential(new DefaultAzureCredentialOptions
             {
                 ManagedIdentityClientId = sp.GetRequiredService<IOptions<ChatAgentHostingOptions>>().Value.Foundry.ManagedIdentityClientId,
@@ -75,7 +74,7 @@ public static class DependencyInjection
                 var options = sp.GetRequiredService<IOptions<ChatAgentHostingOptions>>();
                 return new FoundryChatAgentExecutor(
                     sp.GetRequiredService<IHttpClientFactory>().CreateClient("FoundryChatAgent"),
-                    sp.GetRequiredService<TokenCredential>(), sp.GetRequiredService<IFoundrySessionStore>(), options);
+                    sp.GetRequiredService<TokenCredential>(), sp.GetRequiredService<IFoundrySessionRepository>(), options);
             });
         }
         else
@@ -89,8 +88,6 @@ public static class DependencyInjection
     {
         services.AddPersistence(configuration);
         AddOpenAiOptions(services, configuration);
-        services.AddSingleton<IChatStore, EfChatStore>();
-        services.AddSingleton<IAgentStore, EfAgentStore>();
     }
 
     /// <summary>The Foundry process needs the same tools, but no webhooks, Service Bus, or remote executor.</summary>
@@ -174,15 +171,12 @@ public static class DependencyInjection
 
     /// <summary>
     /// Adds operator access to the worker's SQL Server state. Indexed-file views are read-only;
-    /// delta checkpoints can also be reset or deleted.
+    /// delta checkpoints can also be reset or deleted. Both come from the persistence layer's
+    /// repositories, so this is the database registration and nothing more — it stays as its own call
+    /// because it says why the API needs the database, which <c>AddPersistence</c> alone does not.
     /// </summary>
-    public static IServiceCollection AddIndexStateServices(this IServiceCollection services, IConfiguration configuration)
-    {
+    public static IServiceCollection AddIndexStateServices(this IServiceCollection services, IConfiguration configuration) =>
         services.AddPersistence(configuration);
-        services.AddSingleton<IIndexStateReader, EfIndexStateReader>();
-        services.AddSingleton<DeltaStateAdminService>();
-        return services;
-    }
 
     /// <summary>
     /// Adds targeted reindexing to the API. The API already registers Graph, search, embeddings, MarkItDown,
@@ -197,8 +191,6 @@ public static class DependencyInjection
             .Validate(o => o.AllowedFileExtensions.Any(x => !string.IsNullOrWhiteSpace(x)), "Processor:AllowedFileExtensions must list at least one file extension.").ValidateOnStart();
         services.AddHttpClient<DocumentIntelligenceClient>();
         services.AddSingleton<IContentExtractor, ContentExtractor>();
-        services.AddSingleton<IDeltaStateStore, EfDeltaStateStore>();
-        services.AddSingleton<IFileMetadataStore, EfFileMetadataStore>();
         services.AddSingleton<ISearchIndexStore, AzureSearchIndexStore>();
         services.AddSingleton<ISharePointChangeProcessor, SharePointChangeProcessor>();
         return services;
@@ -252,8 +244,6 @@ public static class DependencyInjection
         {
             AddServiceBusClient(services);
         }
-        services.AddSingleton<IDeltaStateStore, EfDeltaStateStore>();
-        services.AddSingleton<IFileMetadataStore, EfFileMetadataStore>();
         services.AddSingleton(sp =>
         {
             var options = sp.GetRequiredService<IOptions<SearchOptions>>().Value;

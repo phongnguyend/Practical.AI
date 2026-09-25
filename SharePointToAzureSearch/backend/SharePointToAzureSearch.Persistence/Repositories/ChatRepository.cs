@@ -3,13 +3,13 @@ using Microsoft.EntityFrameworkCore;
 using SharePointToAzureSearch.Application;
 using SharePointToAzureSearch.Domain;
 
-namespace SharePointToAzureSearch.Persistence;
+namespace SharePointToAzureSearch.Persistence.Repositories;
 
 /// <summary>
 /// Conversations and messages in the same SQL Server database the worker uses for its own state, so the
 /// chat survives a restart of the API.
 /// </summary>
-public sealed class EfChatStore(IDbContextFactory<SharePointIndexDbContext> contextFactory) : IChatStore
+public sealed class ChatRepository(IDbContextFactory<SharePointIndexDbContext> contextFactory) : IChatRepository
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 

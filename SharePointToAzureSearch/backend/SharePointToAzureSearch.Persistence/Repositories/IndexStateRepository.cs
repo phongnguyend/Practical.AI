@@ -2,9 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using SharePointToAzureSearch.Application;
 using SharePointToAzureSearch.Domain;
 
-namespace SharePointToAzureSearch.Persistence;
+namespace SharePointToAzureSearch.Persistence.Repositories;
 
-public sealed class EfIndexStateReader(IDbContextFactory<SharePointIndexDbContext> contextFactory) : IIndexStateReader
+public sealed class IndexStateRepository(IDbContextFactory<SharePointIndexDbContext> contextFactory) : IIndexStateRepository
 {
     private static readonly IndexStateSummary EmptySummary = new(0, 0, null, 0, 0, 0, null, null, []);
 

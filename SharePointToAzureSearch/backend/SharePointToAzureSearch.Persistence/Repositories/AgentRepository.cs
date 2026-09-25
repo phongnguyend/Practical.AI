@@ -4,12 +4,12 @@ using Microsoft.Extensions.Options;
 using SharePointToAzureSearch.Application;
 using SharePointToAzureSearch.Domain;
 
-namespace SharePointToAzureSearch.Persistence;
+namespace SharePointToAzureSearch.Persistence.Repositories;
 
 /// <summary>Stores agent definitions in the application's SQL Server database.</summary>
-public sealed class EfAgentStore(
+public sealed class AgentRepository(
     IDbContextFactory<SharePointIndexDbContext> contextFactory,
-    IOptions<OpenAiOptions> openAiOptions) : IAgentStore
+    IOptions<OpenAiOptions> openAiOptions) : IAgentRepository
 {
     private readonly string _defaultModelId = openAiOptions.Value.ChatDeployment;
 

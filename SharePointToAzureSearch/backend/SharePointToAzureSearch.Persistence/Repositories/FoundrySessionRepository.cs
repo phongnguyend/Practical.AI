@@ -1,10 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using SharePointToAzureSearch.Application;
 
-namespace SharePointToAzureSearch.Persistence;
+namespace SharePointToAzureSearch.Persistence.Repositories;
 
 /// <summary>Persists sandbox affinity across API restarts; branches start with no sandbox binding.</summary>
-public sealed class EfFoundrySessionStore(IDbContextFactory<SharePointIndexDbContext> factory) : IFoundrySessionStore
+public sealed class FoundrySessionRepository(IDbContextFactory<SharePointIndexDbContext> factory) : IFoundrySessionRepository
 {
     public async Task<string?> GetAsync(Guid conversationId, string endpoint, CancellationToken cancellationToken)
     {

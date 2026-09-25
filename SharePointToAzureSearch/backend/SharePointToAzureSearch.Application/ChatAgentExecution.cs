@@ -21,7 +21,7 @@ public sealed record ChatAgentContext(
     ChatMessageRecord Question);
 
 /// <summary>Loads the same bounded, database-backed context for local and hosted execution.</summary>
-public sealed class ChatAgentContextLoader(IChatStore chats, IAgentStore agents)
+public sealed class ChatAgentContextLoader(IChatRepository chats, IAgentRepository agents)
 {
     public const int MaxHistoryMessages = 40;
 

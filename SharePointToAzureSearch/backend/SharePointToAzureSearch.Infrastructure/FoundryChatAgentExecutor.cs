@@ -13,7 +13,7 @@ namespace SharePointToAzureSearch.Infrastructure;
 public sealed class FoundryChatAgentExecutor(
     HttpClient http,
     TokenCredential credential,
-    IFoundrySessionStore sessions,
+    IFoundrySessionRepository sessions,
     IOptions<ChatAgentHostingOptions> options) : IChatAgentExecutor
 {
     private readonly FoundryChatAgentOptions _options = options.Value.Foundry;

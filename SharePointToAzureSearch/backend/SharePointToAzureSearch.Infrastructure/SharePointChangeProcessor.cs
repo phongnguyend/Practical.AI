@@ -10,8 +10,8 @@ namespace SharePointToAzureSearch.Infrastructure;
 
 public sealed class SharePointChangeProcessor(
     SharePointClient sharePointClient,
-    IDeltaStateStore state,
-    IFileMetadataStore metadata,
+    IDeltaStateRepository state,
+    IFileMetadataRepository metadata,
     ISearchIndexStore search,
     IContentExtractor extractor,
     IEmbeddingGenerator<string, Embedding<float>> embeddings,
@@ -89,7 +89,7 @@ public sealed class SharePointChangeProcessor(
             catch (GraphDeltaTokenExpiredException)
             {
                 logger.LogWarning("The Microsoft Graph delta token expired. A full drive reconciliation will be performed.");
-                await state.ClearAsync(driveId, cancellationToken);
+                await state.DeleteAsync(driveId, cancellationToken);
                 checkpoint = null;
                 scanId = StartOrContinueScan(null);
                 await ProcessDeltaAsync(driveId, scanId, null, cancellationToken);

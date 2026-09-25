@@ -15,8 +15,8 @@ public sealed class ChatAgentContextTests
     [Fact]
     public async Task LoadsDatabaseSettingsAndOnlyFortyMessagesBeforeTheSavedQuestion()
     {
-        var chats = Substitute.For<IChatStore>();
-        var agents = Substitute.For<IAgentStore>();
+        var chats = Substitute.For<IChatRepository>();
+        var agents = Substitute.For<IAgentRepository>();
         var id = Guid.NewGuid();
         var agent = new AgentDefinition(Guid.NewGuid(), "Document agent", "model-from-db", "instructions-from-db", default, default);
         var conversation = new ChatConversation(id, "Chat", "user-from-db", agent.Id, default, default, 53, 0, 0, 0);
@@ -40,8 +40,8 @@ public sealed class ChatAgentContextTests
     [Fact]
     public async Task RejectsQuestionNotInTheConversation()
     {
-        var chats = Substitute.For<IChatStore>();
-        var agents = Substitute.For<IAgentStore>();
+        var chats = Substitute.For<IChatRepository>();
+        var agents = Substitute.For<IAgentRepository>();
         var id = Guid.NewGuid();
         chats.GetConversationAsync(id, default).Returns(new ChatConversation(id, "Chat", null, null, default, default, 0, 0, 0, 0));
         agents.GetByNameAsync(AgentDefaults.Name, default)

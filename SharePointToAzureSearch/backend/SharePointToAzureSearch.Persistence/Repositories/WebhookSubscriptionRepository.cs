@@ -2,10 +2,10 @@ using Microsoft.EntityFrameworkCore;
 using SharePointToAzureSearch.Application;
 using SharePointToAzureSearch.Domain;
 
-namespace SharePointToAzureSearch.Persistence;
+namespace SharePointToAzureSearch.Persistence.Repositories;
 
-public sealed class EfWebhookSubscriptionStore(
-    IDbContextFactory<SharePointIndexDbContext> contextFactory) : IWebhookSubscriptionStore
+public sealed class WebhookSubscriptionRepository(
+    IDbContextFactory<SharePointIndexDbContext> contextFactory) : IWebhookSubscriptionRepository
 {
     public async Task<IReadOnlyList<WebhookSubscriptionDefinition>> ListAsync(
         CancellationToken cancellationToken)

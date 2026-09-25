@@ -4,7 +4,6 @@ using Microsoft.Extensions.Options;
 using SharePointToAzureSearch.Application;
 using SharePointToAzureSearch.Domain;
 using SharePointToAzureSearch.Infrastructure;
-using SharePointToAzureSearch.Persistence;
 
 const string FrontendCorsPolicy = "frontend";
 const string NotificationUrlError =
@@ -37,7 +36,7 @@ app.MapPost("/api/sharepoint/webhook", async (
     HttpRequest request,
     IChangeSignalPublisher publisher,
     SharePointClient sharePointClient,
-    IWebhookSubscriptionStore subscriptionStore,
+    IWebhookSubscriptionRepository subscriptionRepository,
     IOptions<SharePointOptions> options,
     ILogger<Program> logger,
     CancellationToken cancellationToken) =>
@@ -54,7 +53,7 @@ app.MapPost("/api/sharepoint/webhook", async (
     }
 
     var driveId = await sharePointClient.GetDriveIdAsync(cancellationToken);
-    var trackedSubscriptions = await subscriptionStore.ListAsync(cancellationToken);
+    var trackedSubscriptions = await subscriptionRepository.ListAsync(cancellationToken);
 
     foreach (var notification in envelope.Value)
     {
@@ -96,11 +95,11 @@ app.MapPost("/api/search/hybrid", (
 // Operator views and checkpoint actions over the worker's SQL Server state. Like the search
 // endpoints, these are unauthenticated and unfiltered, so protect the API before exposing it.
 app.MapGet("/api/state/summary", (
-    IIndexStateReader reader,
+    IIndexStateRepository reader,
     CancellationToken cancellationToken) => reader.GetSummaryAsync(cancellationToken));
 
 app.MapGet("/api/state/indexed-files", async (
-    IIndexStateReader reader,
+    IIndexStateRepository reader,
     CancellationToken cancellationToken,
     string? search = null,
     string? driveId = null,
@@ -126,7 +125,7 @@ app.MapGet("/api/state/indexed-files", async (
 app.MapGet("/api/state/indexed-files/{driveId}/{itemId}", async (
     string driveId,
     string itemId,
-    IIndexStateReader reader,
+    IIndexStateRepository reader,
     CancellationToken cancellationToken) =>
 {
     var file = await reader.GetFileAsync(driveId, itemId, cancellationToken);
@@ -171,7 +170,7 @@ app.MapGet("/api/state/indexed-files/{driveId}/{itemId}/content", async (
     string driveId,
     string itemId,
     HttpContext context,
-    IIndexStateReader reader,
+    IIndexStateRepository reader,
     SharePointClient sharePointClient,
     IOptions<DownloadOptions> downloadOptions,
     CancellationToken cancellationToken) =>
@@ -225,7 +224,7 @@ app.MapGet("/api/state/indexed-files/{driveId}/{itemId}/markdown", async (
     string driveId,
     string itemId,
     HttpContext context,
-    IIndexStateReader reader,
+    IIndexStateRepository reader,
     SharePointClient sharePointClient,
     MarkItDownClient markItDown,
     IOptions<DownloadOptions> downloadOptions,
@@ -260,22 +259,22 @@ app.MapGet("/api/state/indexed-files/{driveId}/{itemId}/markdown", async (
 });
 
 app.MapGet("/api/state/delta", (
-    IIndexStateReader reader,
+    IIndexStateRepository reader,
     CancellationToken cancellationToken) => reader.ListDeltaStateAsync(cancellationToken));
 
 app.MapPost("/api/state/delta/{driveId}/reset", async (
     string driveId,
-    DeltaStateAdminService admin,
+    IDeltaStateRepository deltaState,
     CancellationToken cancellationToken) =>
-    await admin.ResetAsync(driveId, cancellationToken)
+    await deltaState.ResetAsync(driveId, cancellationToken)
         ? Results.Ok(new { reset = driveId })
         : Results.NotFound(new { error = "Delta state record not found." }));
 
 app.MapDelete("/api/state/delta/{driveId}", async (
     string driveId,
-    DeltaStateAdminService admin,
+    IDeltaStateRepository deltaState,
     CancellationToken cancellationToken) =>
-    await admin.DeleteAsync(driveId, cancellationToken)
+    await deltaState.DeleteAsync(driveId, cancellationToken)
         ? Results.Ok(new { deleted = driveId })
         : Results.NotFound(new { error = "Delta state record not found." }));
 
@@ -489,12 +488,12 @@ app.MapGet("/api/agents/default-instructions", (IOptions<OpenAiOptions> openAiOp
         modelId = openAiOptions.Value.ChatDeployment,
     }));
 
-app.MapGet("/api/agents", (IAgentStore store, CancellationToken cancellationToken) =>
+app.MapGet("/api/agents", (IAgentRepository store, CancellationToken cancellationToken) =>
     store.ListAsync(cancellationToken));
 
 app.MapGet("/api/agents/{id:guid}", async (
     Guid id,
-    IAgentStore store,
+    IAgentRepository store,
     CancellationToken cancellationToken) =>
 {
     var agent = await store.GetAsync(id, cancellationToken);
@@ -503,7 +502,7 @@ app.MapGet("/api/agents/{id:guid}", async (
 
 app.MapPost("/api/agents", async (
     AgentDefinitionRequest? body,
-    IAgentStore store,
+    IAgentRepository store,
     IOptions<OpenAiOptions> openAiOptions,
     CancellationToken cancellationToken) =>
 {
@@ -534,7 +533,7 @@ app.MapPost("/api/agents", async (
 app.MapPut("/api/agents/{id:guid}", async (
     Guid id,
     AgentDefinitionRequest? body,
-    IAgentStore store,
+    IAgentRepository store,
     CancellationToken cancellationToken) =>
 {
     var name = body?.Name?.Trim() ?? "";
@@ -564,13 +563,13 @@ app.MapPut("/api/agents/{id:guid}", async (
 // The chat assistant. Conversations live in SQL Server; each turn replays the stored history to an
 // agent that can search the index, and both the question and the answer are appended.
 app.MapGet("/api/chat/conversations", (
-    IChatStore store,
+    IChatRepository store,
     CancellationToken cancellationToken) => store.ListConversationsAsync(cancellationToken));
 
 app.MapPost("/api/chat/conversations", async (
     NewConversation? body,
-    IChatStore store,
-    IAgentStore agentStore,
+    IChatRepository store,
+    IAgentRepository agentRepository,
     CancellationToken cancellationToken) =>
 {
     var title = string.IsNullOrWhiteSpace(body?.Title) ? "New chat" : body!.Title!.Trim();
@@ -587,7 +586,7 @@ app.MapPost("/api/chat/conversations", async (
     }
 
     var usesDefaultAgent = requestedAgentId is null || requestedAgentId == Guid.Empty;
-    var selectedAgent = await ResolveAgentAsync(requestedAgentId, agentStore, cancellationToken);
+    var selectedAgent = await ResolveAgentAsync(requestedAgentId, agentRepository, cancellationToken);
     if (selectedAgent is null)
     {
         return usesDefaultAgent
@@ -600,7 +599,7 @@ app.MapPost("/api/chat/conversations", async (
 
 app.MapDelete("/api/chat/conversations/{id:guid}", async (
     Guid id,
-    IChatStore store,
+    IChatRepository store,
     CancellationToken cancellationToken) =>
     await store.DeleteConversationAsync(id, cancellationToken)
         ? Results.Ok(new { deleted = id })
@@ -609,7 +608,7 @@ app.MapDelete("/api/chat/conversations/{id:guid}", async (
 app.MapPost("/api/chat/conversations/{id:guid}/branch/{messageId:guid}", async (
     Guid id,
     Guid messageId,
-    IChatStore store,
+    IChatRepository store,
     CancellationToken cancellationToken) =>
 {
     var branch = await store.BranchConversationAsync(id, messageId, cancellationToken);
@@ -620,7 +619,7 @@ app.MapPost("/api/chat/conversations/{id:guid}/branch/{messageId:guid}", async (
 
 app.MapGet("/api/chat/conversations/{id:guid}/messages", async (
     Guid id,
-    IChatStore store,
+    IChatRepository store,
     CancellationToken cancellationToken) =>
 {
     var conversation = await store.GetConversationAsync(id, cancellationToken);
@@ -636,8 +635,8 @@ app.MapGet("/api/chat/conversations/{id:guid}/messages", async (
 app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
     Guid id,
     ChatTurnRequest body,
-    IChatStore store,
-    IAgentStore agentStore,
+    IChatRepository store,
+    IAgentRepository agentRepository,
     IChatAgentExecutor agent,
     ChatMessageAttachmentFileService attachmentFiles,
     ILogger<Program> logger,
@@ -661,7 +660,7 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
         return Results.NotFound();
     }
 
-    var selectedAgent = await ResolveAgentAsync(conversation.AgentId, agentStore, cancellationToken);
+    var selectedAgent = await ResolveAgentAsync(conversation.AgentId, agentRepository, cancellationToken);
     if (selectedAgent is null)
     {
         return Results.Problem(
@@ -731,7 +730,7 @@ app.MapPost("/api/chat/conversations/{id:guid}/messages", async (
 });
 
 app.MapGet("/api/chat/feedback", async (
-    IChatStore store,
+    IChatRepository store,
     CancellationToken cancellationToken,
     ChatFeedback? feedback = null,
     string? search = null,
@@ -749,7 +748,7 @@ app.MapGet("/api/chat/feedback", async (
 app.MapPost("/api/chat/messages/{id:guid}/feedback", async (
     Guid id,
     MessageFeedback body,
-    IChatStore store,
+    IChatRepository store,
     CancellationToken cancellationToken) =>
     await store.SetFeedbackAsync(id, body?.Feedback, cancellationToken)
         ? Results.Ok(new { id, feedback = body?.Feedback })
@@ -845,11 +844,11 @@ static string? ValidateAgentDefinition(string name, string modelId, string instr
 
 static Task<AgentDefinition?> ResolveAgentAsync(
     Guid? agentId,
-    IAgentStore agentStore,
+    IAgentRepository agentRepository,
     CancellationToken cancellationToken) =>
     agentId is { } id && id != Guid.Empty
-        ? agentStore.GetAsync(id, cancellationToken)
-        : agentStore.GetByNameAsync(AgentDefaults.Name, cancellationToken);
+        ? agentRepository.GetAsync(id, cancellationToken)
+        : agentRepository.GetByNameAsync(AgentDefaults.Name, cancellationToken);
 
 /// <summary>
 /// Request body for the search endpoints. When <see cref="UserId"/> is supplied, results are restricted to
